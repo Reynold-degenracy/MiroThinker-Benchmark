@@ -2,6 +2,7 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
+import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -110,7 +111,9 @@ async def stream_generator(
     if config_overrides:
         # Create a unique session key that includes config overrides
         # This ensures different configs create different sessions
-        config_hash = hash(frozenset(config_overrides.items()))
+        # Use deterministic hash for consistent session keys across restarts
+        config_str = json.dumps(config_overrides, sort_keys=True)
+        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
         session_key = f"{session_id}_{config_hash}"
     
     if session_key not in _sessions:

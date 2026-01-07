@@ -120,7 +120,7 @@ def test_example_requests():
         "is_confirmed": False,
         "config_overrides": {
             "llm.provider": "qwen",
-            "llm.base_url": "http://localhost:8000/v1"
+            "llm.base_url": "http://localhost:61002/v1"
         }
     }
     
