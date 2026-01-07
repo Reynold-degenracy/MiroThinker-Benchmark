@@ -230,9 +230,22 @@ async def get_response(
         StreamingResponse with NDJSON format:
         - {"status":"plan", "step": 1, "data":"..."}
         - {"status":"answer", "data":"..."}
+    
+    Note:
+        The 'history' parameter is currently not used by the underlying
+        orchestrator implementation. Each request starts a new conversation.
+        Future versions may support conversation history.
     """
     try:
         logger.info(f"Received request for session {x_session_id}: {request.query}")
+        
+        # Note: history parameter is accepted but not currently used
+        # The orchestrator initializes its own message history
+        if request.history:
+            logger.warning(
+                f"History parameter provided but not currently supported. "
+                f"Starting new conversation for session {x_session_id}"
+            )
         
         return StreamingResponse(
             stream_generator(
