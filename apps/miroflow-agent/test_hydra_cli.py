@@ -3,6 +3,7 @@
 Test script to verify Hydra CLI argument support in api_server.py
 """
 
+import os
 import sys
 
 
@@ -18,7 +19,11 @@ def test_hydra_decorator():
     }
     
     try:
-        with open("api_server.py", "r") as f:
+        # Get the directory of this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        api_server_path = os.path.join(script_dir, "api_server.py")
+        
+        with open(api_server_path, "r") as f:
             content = f.read()
             
         # Check for @hydra.main decorator
@@ -71,7 +76,11 @@ def test_documentation():
     }
     
     try:
-        with open("API_README.md", "r") as f:
+        # Get the directory of this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        readme_path = os.path.join(script_dir, "API_README.md")
+        
+        with open(readme_path, "r") as f:
             content = f.read()
             
         # Check for CLI override section

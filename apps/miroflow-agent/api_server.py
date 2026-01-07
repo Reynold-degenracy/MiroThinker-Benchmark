@@ -68,11 +68,14 @@ def initialize_config(overrides: Optional[List[str]] = None):
     # If we have a CLI-provided default config, use it as base
     if _default_cfg is not None:
         if overrides:
-            # Apply additional overrides on top of CLI config
-            # Need to re-initialize Hydra to apply overrides
-            with hydra.initialize(config_path="conf", version_base=None):
-                # Extract the original CLI overrides and combine with new ones
-                return hydra.compose(config_name="config", overrides=overrides)
+            # Apply additional overrides on top of CLI config using OmegaConf.merge
+            # This preserves CLI settings and applies request-specific overrides
+            merged_cfg = OmegaConf.create(_default_cfg)
+            for override in overrides:
+                # Parse override string (e.g., "llm.temperature=0.7")
+                key, value = override.split("=", 1)
+                OmegaConf.update(merged_cfg, key, value, merge=True)
+            return merged_cfg
         return _default_cfg
     
     # Otherwise, initialize with default config
