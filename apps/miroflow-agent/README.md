@@ -21,7 +21,14 @@ Before running the agent, ensure you have:
 Start the API server to use the agent via REST API:
 
 ```bash
+# Basic usage
 python3 api_server.py
+
+# With Hydra config overrides (e.g., custom LLM provider)
+python3 api_server.py llm=qwen-3 llm.base_url=http://localhost:61002/v1
+
+# With multiple overrides
+python3 api_server.py llm=qwen-3 llm.api_key=xxxxx llm.base_url=http://localhost:61002/v1
 ```
 
 The server will run on `http://localhost:8000`. See [API_README.md](./API_README.md) for detailed API documentation and usage examples.

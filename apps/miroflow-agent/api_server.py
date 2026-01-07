@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
@@ -22,6 +23,7 @@ logger = bootstrap_logger()
 
 # Global configuration storage
 _cfg: Optional[DictConfig] = None
+_default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
 _sessions: Dict[str, Dict] = {}
 
 
@@ -61,7 +63,19 @@ def initialize_config(overrides: Optional[List[str]] = None):
     Returns:
         DictConfig: The composed configuration
     """
-    global _cfg
+    global _cfg, _default_cfg
+    
+    # If we have a CLI-provided default config, use it as base
+    if _default_cfg is not None:
+        if overrides:
+            # Apply additional overrides on top of CLI config
+            # Need to re-initialize Hydra to apply overrides
+            with hydra.initialize(config_path="conf", version_base=None):
+                # Extract the original CLI overrides and combine with new ones
+                return hydra.compose(config_name="config", overrides=overrides)
+        return _default_cfg
+    
+    # Otherwise, initialize with default config
     if _cfg is None:
         # Initialize Hydra with default config (only once at startup)
         with hydra.initialize(config_path="conf", version_base=None):
@@ -336,7 +350,30 @@ async def health_check():
     return {"status": "healthy"}
 
 
-if __name__ == "__main__":
+@hydra.main(config_path="conf", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    """
+    Main entry point with Hydra configuration support.
+    
+    Allows overriding configuration from command line:
+        python api_server.py llm=qwen-3 llm.api_key=xxxxx llm.base_url=http://localhost:8000/v1
+    """
+    global _default_cfg
+    
+    # Store the CLI-provided config as default
+    _default_cfg = cfg
+    
+    logger.info("=" * 50)
+    logger.info("MiroFlow Agent API Server - Configuration")
+    logger.info("=" * 50)
+    logger.info(OmegaConf.to_yaml(cfg))
+    logger.info("=" * 50)
+    
     import uvicorn
     
+    # Run the FastAPI server
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()

@@ -4,12 +4,34 @@ This API provides a streaming endpoint for the MiroFlow Agent to process queries
 
 ## Running the Server
 
+### Basic Usage
+
 ```bash
 # From the miroflow-agent directory
 python3 api_server.py
 ```
 
 The server will start on `http://localhost:8000` by default.
+
+### With Hydra Configuration Overrides
+
+You can override Hydra configuration settings when starting the server using command-line arguments:
+
+```bash
+# Override LLM provider and settings
+python3 api_server.py llm=qwen-3 llm.base_url=http://localhost:61002/v1
+
+# Override multiple settings
+python3 api_server.py llm=qwen-3 llm.api_key=xxxxx llm.base_url=http://localhost:61002/v1 llm.temperature=0.7
+
+# Use Claude with custom API key
+python3 api_server.py llm=claude-3-7 llm.api_key=your-api-key-here
+
+# Use GPT-5
+python3 api_server.py llm=gpt-5 llm.api_key=your-openai-key
+```
+
+These CLI overrides set the **default configuration** for the server. All API requests will use these settings unless overridden per-request using the `config_overrides` parameter (see [Configuration Overrides](#configuration-overrides) section).
 
 ## API Endpoint
 
