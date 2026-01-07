@@ -36,17 +36,38 @@ class AnthropicClient(BaseClient):
     def _create_client(self) -> Union[AsyncAnthropic, Anthropic]:
         """Create LLM client"""
         http_client_args = {"headers": {"x-upstream-session-id": self.task_id}}
+
+        try:
+            if self.async_client:
+                http_client = DefaultAsyncHttpxClient(**http_client_args)
+            else:
+                http_client = DefaultHttpxClient(**http_client_args)
+        except ImportError as e:
+            if "socks" in str(e).lower():
+                logger.warning(
+                    "SOCKS proxy settings detected but 'socksio' is not installed. "
+                    "Falling back to direct connection (ignoring proxy environment variables). "
+                    "To use SOCKS proxy, install 'httpx[socks]'."
+                )
+                http_client_args["trust_env"] = False
+                if self.async_client:
+                    http_client = DefaultAsyncHttpxClient(**http_client_args)
+                else:
+                    http_client = DefaultHttpxClient(**http_client_args)
+            else:
+                raise e
+
         if self.async_client:
             return AsyncAnthropic(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                http_client=DefaultAsyncHttpxClient(**http_client_args),
+                http_client=http_client,
             )
         else:
             return Anthropic(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                http_client=DefaultHttpxClient(**http_client_args),
+                http_client=http_client,
             )
 
     def _update_token_usage(self, usage_data: Any) -> None:

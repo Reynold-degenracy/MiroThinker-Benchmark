@@ -4,8 +4,8 @@ defaults:
   - _self_
 
 provider: "qwen"
-model_name: "qwen-3"
-base_url: "https://your-api.com/v1"
+model_name: "qwen/qwen3-32b"
+base_url: "https://openrouter.ai/api/v1"
 max_context_length: 262144
 max_tokens: 16384
 top_p: 0.95

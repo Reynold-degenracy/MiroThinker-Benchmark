@@ -19,18 +19,48 @@ logger = logging.getLogger("miroflow_agent")
 class OpenAIClient(BaseClient):
     def _create_client(self) -> Union[AsyncOpenAI, OpenAI]:
         """Create LLM client"""
+        # Enable detailed HTTP logs for debugging
+        logging.getLogger("httpx").setLevel(logging.DEBUG)
+
+        if self.api_key:
+            masked_key = f"{self.api_key[:6]}...{self.api_key[-4:]}" if len(self.api_key) > 10 else "***"
+            logger.info(f"LLM Client Init | Provider: {self.provider} | Model: {self.model_name} | Base URL: {self.base_url} | API Key: {masked_key}")
+        else:
+            logger.warning(f"LLM Client Init | Provider: {self.provider} | Model: {self.model_name} | Base URL: {self.base_url} | API Key: NOT SET")
+
         http_client_args = {"headers": {"x-upstream-session-id": self.task_id}}
+
+        try:
+            if self.async_client:
+                http_client = DefaultAsyncHttpxClient(**http_client_args)
+            else:
+                http_client = DefaultHttpxClient(**http_client_args)
+        except ImportError as e:
+            if "socks" in str(e).lower():
+                logger.warning(
+                    "SOCKS proxy settings detected but 'socksio' is not installed. "
+                    "Falling back to direct connection (ignoring proxy environment variables). "
+                    "To use SOCKS proxy, install 'httpx[socks]'."
+                )
+                http_client_args["trust_env"] = False
+                if self.async_client:
+                    http_client = DefaultAsyncHttpxClient(**http_client_args)
+                else:
+                    http_client = DefaultHttpxClient(**http_client_args)
+            else:
+                raise e
+
         if self.async_client:
             return AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                http_client=DefaultAsyncHttpxClient(**http_client_args),
+                http_client=http_client,
             )
         else:
             return OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                http_client=DefaultHttpxClient(**http_client_args),
+                http_client=http_client,
             )
 
     def _update_token_usage(self, usage_data: Any) -> None:
@@ -232,7 +262,14 @@ class OpenAIClient(BaseClient):
                 )
                 raise e
             except Exception as e:
-                if "Error code: 400" in str(e) and "longer than the model" in str(e):
+                if "Error code: 401" in str(e):
+                    self.task_log.log_step(
+                        "error",
+                        "LLM | Authentication Error",
+                        f"Authentication failed: {str(e)}",
+                    )
+                    raise e
+                elif "Error code: 400" in str(e) and "longer than the model" in str(e):
                     self.task_log.log_step(
                         "error",
                         "LLM | Context Length Error",

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Parse environment variables, use defaults if not set
-LLM_MODEL=${LLM_MODEL:-"MiroThinker-Models"}
-BASE_URL=${BASE_URL:-"https://your-api.com/v1"}
+LLM_MODEL=${LLM_MODEL:-"qwen/qwen3-32b"}
+BASE_URL=${BASE_URL:-"https://openrouter.ai/api/v1"}
 
 # Configuration parameters
 NUM_RUNS=${NUM_RUNS:-8}
@@ -13,7 +13,7 @@ MAX_CONTEXT_LENGTH=${MAX_CONTEXT_LENGTH:-262144}
 MAX_CONCURRENT=${MAX_CONCURRENT:-10}
 PASS_AT_K=${PASS_AT_K:-1}
 TEMPERATURE=${TEMPERATURE:-1.0}
-API_KEY=${API_KEY:-"xxx"}
+API_KEY=${API_KEY:-"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"}
 
 # Set results directory
 RESULTS_DIR="../../logs/${BENCHMARK_NAME}/${LLM_PROVIDER}_${LLM_MODEL}_${AGENT_SET}"
