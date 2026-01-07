@@ -31,7 +31,11 @@ Submit a question and receive streaming responses.
     {"role": "user", "content": "你好"},
     {"role": "assistant", "content": "你好，有什么可以帮你？"}
   ],
-  "is_confirmed": false
+  "is_confirmed": false,
+  "config_overrides": {
+    "llm.provider": "qwen",
+    "llm.base_url": "http://localhost:8000/v1"
+  }
 }
 ```
 
@@ -42,6 +46,7 @@ Submit a question and receive streaming responses.
 | query | string | Yes | User's question |
 | history | array | No | Conversation history (elements contain role and content). **Note: Currently not supported - each request starts a new conversation** |
 | is_confirmed | bool | Yes | Whether the plan is confirmed. `false`: continue planner flow, `true`: execute actor flow |
+| config_overrides | object | No | Hydra configuration overrides (e.g., LLM provider, model, base_url). See [Configuration Overrides](#configuration-overrides) section |
 
 #### Response Format
 
@@ -118,9 +123,91 @@ curl http://localhost:8000/health
 
 Returns: `{"status": "healthy"}`
 
+## Configuration Overrides
+
+You can override Hydra configuration settings on a per-request basis using the `config_overrides` parameter. This allows you to dynamically change LLM providers, models, API endpoints, and other settings without modifying configuration files.
+
+### Common Override Examples
+
+**Use a different LLM provider:**
+```json
+{
+  "query": "What is 2+2?",
+  "is_confirmed": false,
+  "config_overrides": {
+    "llm": "qwen-3",
+    "llm.base_url": "http://localhost:61002/v1"
+  }
+}
+```
+
+**Override specific LLM parameters:**
+```json
+{
+  "query": "What is 2+2?",
+  "is_confirmed": false,
+  "config_overrides": {
+    "llm.temperature": "0.7",
+    "llm.max_tokens": "8192",
+    "llm.model_name": "custom-model"
+  }
+}
+```
+
+**Use Claude with custom API key:**
+```json
+{
+  "query": "What is 2+2?",
+  "is_confirmed": false,
+  "config_overrides": {
+    "llm": "claude-3-7",
+    "llm.api_key": "your-api-key-here"
+  }
+}
+```
+
+**Complete example with curl:**
+```bash
+curl http://localhost:8000/get_response \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: sess_custom_llm" \
+  -d '{
+    "query": "What is the capital of France?",
+    "is_confirmed": false,
+    "config_overrides": {
+      "llm": "qwen-3",
+      "llm.base_url": "http://localhost:61002/v1",
+      "llm.temperature": "0.5"
+    }
+  }'
+```
+
+### Available Configuration Keys
+
+The most commonly used configuration keys for overrides:
+
+**LLM Configuration:**
+- `llm`: LLM config name (e.g., "qwen-3", "claude-3-7", "gpt-5")
+- `llm.provider`: Provider name ("qwen", "anthropic", "openai")
+- `llm.model_name`: Model name string
+- `llm.base_url`: API base URL
+- `llm.api_key`: API key
+- `llm.temperature`: Temperature (0.0-1.0)
+- `llm.max_tokens`: Maximum tokens to generate
+- `llm.top_p`: Top-p sampling parameter
+- `llm.top_k`: Top-k sampling parameter
+
+**Agent Configuration:**
+- `agent`: Agent config name (e.g., "single_agent_keep5", "mirothinker_v1.5_keep5_max200")
+- `agent.main_agent.max_turns`: Maximum agent turns
+
+See the `conf/` directory for all available configuration options.
+
 ## Session Management
 
 Each session is identified by the `X-Session-Id` header. The server maintains separate pipeline components for each session, allowing multiple concurrent users.
+
+**Note:** When using `config_overrides`, each unique combination of session ID and configuration creates a separate session instance. This ensures that different configurations don't interfere with each other.
 
 ## Configuration
 
