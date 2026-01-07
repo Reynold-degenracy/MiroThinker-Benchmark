@@ -137,6 +137,72 @@ for line in response.iter_lines():
         print(f"[{event['status']}] {event.get('step', '')}: {event['data']}")
 ```
 
+## POST /upload_file
+
+Upload a file to the `/home/user/user_files/` directory.
+
+### Headers
+
+- `Content-Type: multipart/form-data`
+- `X-Session-Id`: Session identifier (e.g., `sess_001`)
+
+### Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| file | file | Yes | The file to upload (server-side file path) |
+
+### Response Format
+
+```json
+{
+  "data": {
+    "path": "/home/user/user_files/example.txt"
+  }
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| data.path | string | The file path in the sandbox |
+
+### Example Usage
+
+#### Using curl
+
+```bash
+curl http://localhost:8000/upload_file \
+  -H "X-Session-Id: sess_001" \
+  -F "file=@/path/to/example.txt"
+```
+
+#### Using Python
+
+```python
+import requests
+
+url = "http://localhost:8000/upload_file"
+headers = {
+    "X-Session-Id": "sess_001"
+}
+
+# Upload a file
+with open("/path/to/example.txt", "rb") as f:
+    files = {"file": f}
+    response = requests.post(url, headers=headers, files=files)
+    print(response.json())
+    # Output: {"data": {"path": "/home/user/user_files/example.txt"}}
+```
+
+### Sandbox Notes
+
+- Each `X-Session-Id` corresponds to a sandbox
+- Sandbox lifecycle is 3600 seconds (default TTL), after which a new sandbox is automatically created
+- The server is stateless and does not maintain conversation history
+- Clients should maintain their own history and pass it in requests via the `history` parameter
+
 ## Health Check
 
 ```bash

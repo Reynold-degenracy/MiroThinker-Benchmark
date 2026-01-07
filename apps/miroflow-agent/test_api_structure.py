@@ -17,9 +17,11 @@ def test_api_structure():
         "FastAPI app defined": False,
         "QueryRequest model defined": False,
         "POST /get_response endpoint defined": False,
+        "POST /upload_file endpoint defined": False,
         "Health check endpoint defined": False,
         "NDJSON streaming used": False,
         "Session management implemented": False,
+        "File upload support (UploadFile)": False,
     }
     
     try:
@@ -38,6 +40,10 @@ def test_api_structure():
         if '@app.post("/get_response")' in content:
             checks["POST /get_response endpoint defined"] = True
             
+        # Check for upload endpoint
+        if '@app.post("/upload_file")' in content:
+            checks["POST /upload_file endpoint defined"] = True
+            
         # Check for health endpoint
         if '@app.get("/health")' in content:
             checks["Health check endpoint defined"] = True
@@ -49,6 +55,10 @@ def test_api_structure():
         # Check for session management
         if "X-Session-Id" in content and "_sessions" in content:
             checks["Session management implemented"] = True
+            
+        # Check for file upload support
+        if "UploadFile" in content and "File" in content:
+            checks["File upload support (UploadFile)"] = True
             
     except Exception as e:
         print(f"Error reading file: {e}")

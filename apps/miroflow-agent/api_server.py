@@ -5,12 +5,14 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import hydra
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
@@ -351,6 +353,56 @@ async def get_response(
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.post("/upload_file")
+async def upload_file(
+    file: UploadFile = File(...),
+    x_session_id: str = Header(..., alias="X-Session-Id"),
+):
+    """
+    Upload a file to /home/user/user_files/.
+    
+    Args:
+        file: The file to upload (from multipart/form-data)
+        x_session_id: Session ID from header
+    
+    Returns:
+        JSON response with the file path in the sandbox
+        Example: {"data": {"path": "/home/user/user_files/example.txt"}}
+    
+    Note:
+        - Each X-Session-Id corresponds to a sandbox
+        - Sandbox lifecycle is 3600 seconds (default TTL)
+        - The server is stateless and does not maintain conversation history
+    """
+    try:
+        logger.info(f"Received file upload request for session {x_session_id}: {file.filename}")
+        
+        # Create the target directory if it doesn't exist
+        target_dir = Path("/home/user/user_files")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Construct the full file path
+        file_path = target_dir / file.filename
+        
+        # Save the uploaded file
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        logger.info(f"File saved successfully: {file_path}")
+        
+        # Return the response in the required format
+        return {
+            "data": {
+                "path": str(file_path)
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
