@@ -4,10 +4,11 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
 import hydra
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
@@ -17,11 +18,28 @@ from src.logging.task_logger import bootstrap_logger
 
 # Configure logger
 logger = bootstrap_logger()
-app = FastAPI(title="MiroFlow Agent API")
 
 # Global configuration storage
 _cfg: Optional[DictConfig] = None
 _sessions: Dict[str, Dict] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    logger.info("Starting MiroFlow Agent API Server")
+    initialize_config()
+    yield
+    # Shutdown
+    logger.info("Shutting down MiroFlow Agent API Server")
+    # Clean up all sessions
+    for session_id, session in _sessions.items():
+        # Close tool managers if needed
+        pass
+
+
+app = FastAPI(title="MiroFlow Agent API", lifespan=lifespan)
 
 
 class QueryRequest(BaseModel):
@@ -260,23 +278,6 @@ async def get_response(
     except Exception as e:
         logger.error(f"Error processing request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize configuration on startup"""
-    logger.info("Starting MiroFlow Agent API Server")
-    initialize_config()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("Shutting down MiroFlow Agent API Server")
-    # Clean up all sessions
-    for session_id, session in _sessions.items():
-        # Close tool managers if needed
-        pass
 
 
 @app.get("/health")
