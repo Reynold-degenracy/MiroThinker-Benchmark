@@ -361,20 +361,22 @@ async def upload_file(
     x_session_id: str = Header(..., alias="X-Session-Id"),
 ):
     """
-    Upload a file to /home/user/user_files/.
+    Upload a file to the directory specified by the USER_FILES_DIR
+    environment variable.
     
     Args:
         file: The file to upload (from multipart/form-data)
         x_session_id: Session ID from header
     
     Returns:
-        JSON response with the file path in the sandbox
-        Example: {"data": {"path": "/home/user/user_files/example.txt"}}
+        JSON response with the file path on disk
+        Example: {"data": {"path": "/path/to/user_files/example.txt"}}
     
     Note:
         - Each X-Session-Id corresponds to a sandbox
         - Sandbox lifecycle is 3600 seconds (default TTL)
         - The server is stateless and does not maintain conversation history
+        - Uses USER_FILES_DIR env var; defaults to /home/user/user_files
     """
     try:
         # Validate filename
@@ -396,7 +398,8 @@ async def upload_file(
         logger.info(f"Received file upload request for session {x_session_id}: {safe_filename}")
         
         # Create the target directory if it doesn't exist
-        target_dir = Path("/home/user/user_files")
+        user_files_dir = os.environ.get("USER_FILES_DIR", "/home/user/user_files")
+        target_dir = Path(user_files_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
         
         # Construct the full file path using the sanitized filename
