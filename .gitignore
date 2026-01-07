@@ -219,4 +219,5 @@ data/
 
 .DS_Store
 
-apps/collect-trace/scripts/*/*.sh
+
+apps/miroflow-agent/user_files/*

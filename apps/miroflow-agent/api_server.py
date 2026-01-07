@@ -188,7 +188,7 @@ async def stream_generator(
                                         "status": "answer",
                                         "data": line + '\n'
                                     }
-                                    yield json.dumps(output) + "\n"
+                                    yield json.dumps(output, ensure_ascii=False) + "\n"
                     
                     # show_error is for errors, also treat as answer
                     elif tool_name == "show_error":
@@ -198,7 +198,7 @@ async def stream_generator(
                                 "status": "answer",
                                 "data": f"Error: {error_text}"
                             }
-                            yield json.dumps(output) + "\n"
+                            yield json.dumps(output, ensure_ascii=False) + "\n"
                     
                     # Other tool calls are planning steps
                     else:
@@ -207,7 +207,7 @@ async def stream_generator(
                             plan_text = f"Using tool: {tool_name}"
                             if tool_input:
                                 # Truncate large inputs for display
-                                input_str = json.dumps(tool_input)
+                                input_str = json.dumps(tool_input, ensure_ascii=False)
                                 if len(input_str) > 200:
                                     input_str = input_str[:200] + "..."
                                 plan_text += f" with input: {input_str}"
@@ -217,7 +217,7 @@ async def stream_generator(
                                 "step": current_step,
                                 "data": plan_text
                             }
-                            yield json.dumps(output) + "\n"
+                            yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "message":
                     # Messages are assistant responses (answer phase)
@@ -227,7 +227,7 @@ async def stream_generator(
                             "status": "answer",
                             "data": delta_content
                         }
-                        yield json.dumps(output) + "\n"
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "start_of_agent":
                     # Starting an agent indicates planning
@@ -239,7 +239,7 @@ async def stream_generator(
                             "step": current_step,
                             "data": f"Starting agent: {agent_name}"
                         }
-                        yield json.dumps(output) + "\n"
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "start_of_workflow":
                     # Workflow start
@@ -250,7 +250,7 @@ async def stream_generator(
                             "step": current_step,
                             "data": "Workflow started"
                         }
-                        yield json.dumps(output) + "\n"
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "end_of_workflow":
                     # Workflow end - signal completion
@@ -262,7 +262,7 @@ async def stream_generator(
                 "status": "answer",
                 "data": f"Error: {str(e)}"
             }
-            yield json.dumps(error_output) + "\n"
+            yield json.dumps(error_output, ensure_ascii=False) + "\n"
     
     # Start pipeline execution in background
     async def run_pipeline():

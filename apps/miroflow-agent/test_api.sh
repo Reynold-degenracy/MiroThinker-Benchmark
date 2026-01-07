@@ -58,7 +58,7 @@ curl -N "${BASE_URL}/get_response" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_test_002" \
   -d '{
-    "query": "帮我找到马斯克的最近一条推特",
+    "query": "帮我找到马斯克在推特上的最近一条推文",
     "history": [
       {"role": "user", "content": "你好"},
       {"role": "assistant", "content": "你好，有什么可以帮你? "}
