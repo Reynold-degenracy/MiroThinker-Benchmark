@@ -2,14 +2,15 @@
 
 ## Overview
 
-This implementation adds a FastAPI-based REST API to the MiroFlow Agent application, providing a `/get_response` endpoint that streams responses in NDJSON format.
+This implementation adds a FastAPI-based REST API to the MiroFlow Agent application, providing `/get_response` and `/upload_file` endpoints that enable AI agent interaction and file upload capabilities.
 
 ## Files Added/Modified
 
-### 1. `api_server.py` (NEW)
+### 1. `api_server.py` (MODIFIED)
 Main API server implementation with:
 - FastAPI application setup
-- `/get_response` POST endpoint
+- `/get_response` POST endpoint for streaming responses
+- `/upload_file` POST endpoint for file uploads
 - Session management via `X-Session-Id` header
 - NDJSON streaming response transformation
 - Health check endpoint
@@ -19,25 +20,51 @@ Added dependencies:
 - `fastapi>=0.115.0`
 - `uvicorn>=0.32.0`
 
-### 3. `API_README.md` (NEW)
+### 3. `API_README.md` (MODIFIED)
 Comprehensive documentation including:
-- API endpoint specifications
+- API endpoint specifications (including `/upload_file`)
 - Request/response format examples
 - Usage examples (curl, Python)
 - Configuration notes
+- Sandbox lifecycle information
 
-### 4. `test_api_structure.py` (NEW)
+### 4. `test_api_structure.py` (MODIFIED)
 Validation script that tests:
 - API structure and components
 - Response format correctness
 - NDJSON output format
+- File upload endpoint presence
 
-### 5. `test_api.sh` (NEW)
-Shell script with curl commands to test the API with various scenarios
+### 5. `test_api.sh` (MODIFIED)
+Shell script with curl commands to test the API with various scenarios including file upload
 
 ## Implementation Details
 
-### Request Format
+### POST /upload_file
+
+The new `/upload_file` endpoint enables file uploads to the sandbox environment.
+
+**Request Format:**
+- Headers: `Content-Type: multipart/form-data`, `X-Session-Id: sess_001`
+- Body: Form data with `file` field containing the file to upload
+
+**Response Format:**
+```json
+{
+  "data": {
+    "path": "/home/user/user_files/example.txt"
+  }
+}
+```
+
+**Implementation Details:**
+- Accepts `UploadFile` from FastAPI's multipart form handling
+- Creates `/home/user/user_files/` directory if it doesn't exist
+- Saves uploaded file with original filename
+- Returns the full path in the sandbox
+- Handles X-Session-Id for session management (sandbox lifecycle: 3600s)
+
+### POST /get_response - Request Format
 ```json
 {
   "query": "user_files 文件夹里的文件主题是什么",
@@ -142,6 +169,7 @@ The API uses Hydra configuration from the `conf/` directory. Environment variabl
 
 The implementation fully complies with the requirements specified in the problem statement:
 
+### GET /get_response
 ✅ POST /get_response endpoint
 ✅ Headers: Content-Type, X-Session-Id
 ✅ Request parameters: query, history, is_confirmed
@@ -150,3 +178,13 @@ The implementation fully complies with the requirements specified in the problem
 ✅ step field for plan events
 ✅ data field with text fragments
 ✅ is_confirmed flag handling
+
+### POST /upload_file
+✅ POST /upload_file endpoint
+✅ Headers: Content-Type (multipart/form-data), X-Session-Id
+✅ Request parameter: file (file upload)
+✅ Returns JSON with data.path field
+✅ Uploads to /home/user/user_files/
+✅ Session management with X-Session-Id
+✅ Sandbox lifecycle: 3600 seconds (TTL)
+✅ Stateless server design

@@ -68,3 +68,27 @@ curl -N "${BASE_URL}/get_response" \
 
 echo ""
 echo ""
+
+# Test 4: File Upload
+echo -e "${YELLOW}Test 4: File Upload${NC}"
+echo "POST ${BASE_URL}/upload_file"
+echo "Session ID: sess_test_003"
+echo ""
+
+# Create a temporary test file
+TEST_FILE="/tmp/test_upload.txt"
+echo "This is a test file for upload." > "$TEST_FILE"
+echo "Created test file: $TEST_FILE"
+echo ""
+
+curl "${BASE_URL}/upload_file" \
+  -H "X-Session-Id: sess_test_003" \
+  -F "file=@${TEST_FILE}" 2>&1
+
+echo ""
+echo ""
+
+# Cleanup
+rm -f "$TEST_FILE"
+echo "Test file cleaned up."
+echo ""
