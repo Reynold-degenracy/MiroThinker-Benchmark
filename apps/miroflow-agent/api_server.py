@@ -385,7 +385,8 @@ async def upload_file(
         # Remove any directory components and only keep the base filename
         safe_filename = os.path.basename(file.filename)
         
-        # Additional validation: reject filenames with path traversal attempts
+        # Additional validation: reject filenames with path traversal attempts (defense-in-depth)
+        # Note: os.path.basename already handles this, but we check explicitly as an extra safety layer
         if ".." in safe_filename or "/" in safe_filename or "\\" in safe_filename:
             raise HTTPException(
                 status_code=400, 
@@ -401,7 +402,8 @@ async def upload_file(
         # Construct the full file path using the sanitized filename
         file_path = target_dir / safe_filename
         
-        # Ensure the resolved path is still within the target directory (additional security check)
+        # Ensure the resolved path is still within the target directory (defense-in-depth)
+        # Note: This check is redundant given os.path.basename usage, but provides extra security
         if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
             raise HTTPException(
                 status_code=400,
@@ -428,7 +430,6 @@ async def upload_file(
     except Exception as e:
         logger.error(f"Error uploading file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
