@@ -16,6 +16,16 @@ Before running the agent, ensure you have:
 
 ## Quick Start
 
+### Run as API Server
+
+Start the API server to use the agent via REST API:
+
+```bash
+python3 api_server.py
+```
+
+The server will run on `http://localhost:8000`. See [API_README.md](./API_README.md) for detailed API documentation and usage examples.
+
 ### Run a Single Task
 
 The simplest way to test the agent is running `main.py` directly. It will execute a default task: *"What is the title of today's arxiv paper in computer science?"*
