@@ -58,33 +58,13 @@ curl -N "${BASE_URL}/get_response" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_test_002" \
   -d '{
-    "query": "user_files 文件夹里的文件主题是什么",
+    "query": "帮我找到马斯克的最近一条推特",
     "history": [
       {"role": "user", "content": "你好"},
-      {"role": "assistant", "content": "你好，有什么可以帮你？"}
+      {"role": "assistant", "content": "你好，有什么可以帮你? "}
     ],
     "is_confirmed": false
   }' 2>&1
 
 echo ""
 echo ""
-
-# Test 4: Query with is_confirmed=true
-echo -e "${YELLOW}Test 4: Query with Confirmed Plan${NC}"
-echo "POST ${BASE_URL}/get_response"
-echo "Session ID: sess_test_003"
-echo ""
-curl -N "${BASE_URL}/get_response" \
-  -H "Content-Type: application/json" \
-  -H "X-Session-Id: sess_test_003" \
-  -d '{
-    "query": "Execute the planned actions",
-    "history": null,
-    "is_confirmed": true
-  }' 2>&1
-
-echo ""
-echo ""
-echo "=========================================="
-echo "Tests completed!"
-echo "=========================================="

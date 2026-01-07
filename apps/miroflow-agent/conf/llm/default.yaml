@@ -1,13 +1,14 @@
 # conf/llm/default.yaml - Default LLM configuration
-provider: "anthropic" # openai, anthropic, qwen
-model_name: "claude-3-7-sonnet-20250219"
+provider: "openai" # openai, anthropic, qwen - OpenRouter uses OpenAI-compatible API
+model_name: "google/gemini-2.5-flash"
 async_client: false
 temperature: 0.3
 top_p: 1.0
 min_p: 0.0
 top_k: -1
 max_tokens: 4096
-api_key: ""
-base_url: https://api.anthropic.com
+api_key: ${oc.env:OPENAI_API_KEY}
+base_url: https://openrouter.ai/api/v1
+max_context_length: 1048576
 keep_tool_result: -1
 repetition_penalty: 1.0

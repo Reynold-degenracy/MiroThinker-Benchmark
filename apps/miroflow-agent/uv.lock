@@ -79,6 +79,15 @@ wheels = [
 ]
 
 [[package]]
+name = "annotated-doc"
+version = "0.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/ba/046ceea27344560984e26a590f90bc7f4a75b06701f653222458922b558c/annotated_doc-0.0.4.tar.gz", hash = "sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4", size = 7288, upload-time = "2025-11-10T22:07:42.062Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/d3/26bf1008eb3d2daa8ef4cacc7f3bfdc11818d111f7e2d0201bc6e3b49d45/annotated_doc-0.0.4-py3-none-any.whl", hash = "sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320", size = 5303, upload-time = "2025-11-10T22:07:40.673Z" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -560,16 +569,16 @@ wheels = [
 
 [[package]]
 name = "e2b-code-interpreter"
-version = "1.5.2"
+version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "e2b" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/85/b4a1c9427b45818d4c3773ed967ec1fcc2d7b677e096d8051303889adc2d/e2b_code_interpreter-1.5.2.tar.gz", hash = "sha256:3bd6ea70596290e85aaf0a2f19f28bf37a5e73d13086f5e6a0080bb591c5a547", size = 10006, upload-time = "2025-07-07T14:58:28.676Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/6a/2bc78bd39c16c2430ecb9ac80ce708bac3bd3153ed114cc70fe9528132dc/e2b_code_interpreter-1.2.1.tar.gz", hash = "sha256:bb01075b6ddb9c1a10774da521e8aa32e7fac710d23b9d8fbe8224d0e04b866b", size = 9276, upload-time = "2025-04-18T22:59:02.831Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/4a/7dc5c673c47418e1b38594ab3b022ee20ea1bf3ff8f8aa8273d6ddc99532/e2b_code_interpreter-1.5.2-py3-none-any.whl", hash = "sha256:5c3188d8f25226b28fef4b255447cc6a4c36afb748bdd5180b45be486d5169f3", size = 12873, upload-time = "2025-07-07T14:58:27.622Z" },
+    { url = "https://files.pythonhosted.org/packages/48/82/009b7600afcb0b983d0b19547d0227c060409aa203f1446993db8299f1c6/e2b_code_interpreter-1.2.1-py3-none-any.whl", hash = "sha256:9d60e8b3756fc3c04c04285e2106dcb19305a18a01894aeb4b06d2c400e03e2e", size = 12047, upload-time = "2025-04-18T22:59:01.41Z" },
 ]
 
 [[package]]
@@ -622,6 +631,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/91/50/a9d80c47ff289c611ff12e63f7c5d13942c65d68125160cefd768c73e6e4/executing-2.2.0.tar.gz", hash = "sha256:5d108c028108fe2551d1a7b2e8b713341e2cb4fc0aa7dcf966fa4327a5226755", size = 978693, upload-time = "2025-01-22T15:41:29.403Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/8f/c4d9bafc34ad7ad5d8dc16dd1347ee0e507a52c3adb6bfa8887e1c6a26ba/executing-2.2.0-py2.py3-none-any.whl", hash = "sha256:11387150cad388d62750327a53d3339fad4888b39a6fe233c3afbb54ecffd3aa", size = 26702, upload-time = "2025-01-22T15:41:25.929Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.128.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/08/8c8508db6c7b9aae8f7175046af41baad690771c9bcde676419965e338c7/fastapi-0.128.0.tar.gz", hash = "sha256:1cc179e1cef10a6be60ffe429f79b829dce99d8de32d7acb7e6c8dfdf7f2645a", size = 365682, upload-time = "2025-12-27T15:21:13.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5c/05/5cbb59154b093548acd0f4c7c474a118eda06da25aa75c616b72d8fcd92a/fastapi-0.128.0-py3-none-any.whl", hash = "sha256:aebd93f9716ee3b4f4fcfe13ffb7cf308d99c9f3ab5622d8877441072561582d", size = 103094, upload-time = "2025-12-27T15:21:12.154Z" },
 ]
 
 [[package]]
@@ -851,6 +875,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
+]
+
+[package.optional-dependencies]
+socks = [
+    { name = "socksio" },
 ]
 
 [[package]]
@@ -1348,8 +1377,10 @@ dependencies = [
     { name = "datasets" },
     { name = "duckduckgo-search" },
     { name = "e2b-code-interpreter" },
+    { name = "fastapi" },
     { name = "fastmcp" },
     { name = "google-genai" },
+    { name = "httpx", extra = ["socks"] },
     { name = "huggingface-hub" },
     { name = "hydra-core" },
     { name = "ipdb" },
@@ -1381,6 +1412,7 @@ dependencies = [
     { name = "tencentcloud-sdk-python" },
     { name = "tiktoken" },
     { name = "transformers" },
+    { name = "uvicorn" },
     { name = "wikipedia" },
     { name = "youtube-transcript-api" },
 ]
@@ -1404,9 +1436,11 @@ requires-dist = [
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "datasets", specifier = ">=3.5.0" },
     { name = "duckduckgo-search", specifier = ">=6.3.7" },
-    { name = "e2b-code-interpreter", specifier = ">=1.2.1" },
+    { name = "e2b-code-interpreter", specifier = "==1.2.1" },
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastmcp" },
     { name = "google-genai" },
+    { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=0.28.0" },
     { name = "hydra-core" },
     { name = "ipdb", specifier = ">=0.13.13" },
@@ -1438,6 +1472,7 @@ requires-dist = [
     { name = "tencentcloud-sdk-python", specifier = ">=3.0.1451" },
     { name = "tiktoken", specifier = ">=0.9.0" },
     { name = "transformers", specifier = ">=4.51.3" },
+    { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "wikipedia" },
     { name = "youtube-transcript-api" },
 ]
@@ -1467,6 +1502,7 @@ dependencies = [
     { name = "mcp" },
     { name = "mutagen" },
     { name = "playwright" },
+    { name = "redis" },
     { name = "requests" },
     { name = "wikipedia" },
 ]
@@ -1474,13 +1510,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
-    { name = "e2b-code-interpreter", specifier = ">=1.2.1" },
+    { name = "e2b-code-interpreter", specifier = "==1.2.1" },
     { name = "fastmcp", specifier = ">=0.1.0" },
     { name = "google-genai" },
     { name = "markitdown-mcp", specifier = ">=0.0.1a3" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "mutagen" },
     { name = "playwright", specifier = ">=1.40.0" },
+    { name = "redis" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "wikipedia" },
 ]
@@ -2426,6 +2463,15 @@ wheels = [
 ]
 
 [[package]]
+name = "redis"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/c8/983d5c6579a411d8a99bc5823cc5712768859b5ce2c8afe1a65b37832c81/redis-7.1.0.tar.gz", hash = "sha256:b1cc3cfa5a2cb9c2ab3ba700864fb0ad75617b41f01352ce5779dabf6d5f9c3c", size = 4796669, upload-time = "2025-11-19T15:54:39.961Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/f0/8956f8a86b20d7bb9d6ac0187cf4cd54d8065bc9a1a09eb8011d4d326596/redis-7.1.0-py3-none-any.whl", hash = "sha256:23c52b208f92b56103e17c5d06bdc1a6c2c0b3106583985a76a18f83b265de2b", size = 354159, upload-time = "2025-11-19T15:54:38.064Z" },
+]
+
+[[package]]
 name = "referencing"
 version = "0.36.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2640,6 +2686,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "socksio"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/5c/48a7d9495be3d1c651198fd99dbb6ce190e2274d0f28b9051307bdec6b85/socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac", size = 19055, upload-time = "2020-04-17T15:50:34.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3", size = 12763, upload-time = "2020-04-17T15:50:31.878Z" },
 ]
 
 [[package]]
