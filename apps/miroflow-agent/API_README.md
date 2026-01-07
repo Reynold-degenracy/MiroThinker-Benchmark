@@ -150,7 +150,7 @@ Upload a file to the `/home/user/user_files/` directory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file | file | Yes | The file to upload (server-side file path) |
+| file | file | Yes | The file to upload from the client |
 
 ### Response Format
 

@@ -377,14 +377,36 @@ async def upload_file(
         - The server is stateless and does not maintain conversation history
     """
     try:
-        logger.info(f"Received file upload request for session {x_session_id}: {file.filename}")
+        # Validate filename
+        if not file.filename or file.filename.strip() == "":
+            raise HTTPException(status_code=400, detail="Filename is required")
+        
+        # Sanitize filename to prevent path traversal attacks
+        # Remove any directory components and only keep the base filename
+        safe_filename = os.path.basename(file.filename)
+        
+        # Additional validation: reject filenames with path traversal attempts
+        if ".." in safe_filename or "/" in safe_filename or "\\" in safe_filename:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid filename: path traversal characters not allowed"
+            )
+        
+        logger.info(f"Received file upload request for session {x_session_id}: {safe_filename}")
         
         # Create the target directory if it doesn't exist
         target_dir = Path("/home/user/user_files")
         target_dir.mkdir(parents=True, exist_ok=True)
         
-        # Construct the full file path
-        file_path = target_dir / file.filename
+        # Construct the full file path using the sanitized filename
+        file_path = target_dir / safe_filename
+        
+        # Ensure the resolved path is still within the target directory (additional security check)
+        if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path: file must be uploaded to the designated directory"
+            )
         
         # Save the uploaded file
         with open(file_path, "wb") as f:
@@ -400,9 +422,13 @@ async def upload_file(
             }
         }
     
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error(f"Error uploading file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
