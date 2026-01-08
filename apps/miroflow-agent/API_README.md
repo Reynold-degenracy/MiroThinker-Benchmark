@@ -157,7 +157,8 @@ Upload a file to the `/home/user/user_files/` directory.
 ```json
 {
   "data": {
-    "path": "/home/user/user_files/example.txt"
+    "path": "/home/user/example.txt",
+    "sandbox_id": "abc123xyz"
   }
 }
 ```
@@ -167,6 +168,7 @@ Upload a file to the `/home/user/user_files/` directory.
 | Field | Type | Description |
 |-------|------|-------------|
 | data.path | string | The file path in the sandbox |
+| data.sandbox_id | string | The sandbox_id where the file was uploaded (stored in session for future use) |
 
 ### Example Usage
 
@@ -193,15 +195,67 @@ with open("/path/to/example.txt", "rb") as f:
     files = {"file": f}
     response = requests.post(url, headers=headers, files=files)
     print(response.json())
-    # Output: {"data": {"path": "/home/user/user_files/example.txt"}}
+    # Output: {"data": {"path": "/home/user/example.txt", "sandbox_id": "abc123xyz"}}
 ```
 
 ### Sandbox Notes
 
-- Each `X-Session-Id` corresponds to a sandbox
-- Sandbox lifecycle is 3600 seconds (default TTL), after which a new sandbox is automatically created
+- Each `X-Session-Id` corresponds to a session with its own sandbox
+- **Session-to-Sandbox Mapping**: Once a sandbox is created for a session (via file upload or tool call), the sandbox_id is automatically reused for all subsequent requests in that session
+- **Automatic sandbox_id injection**: Tools that require sandbox_id (like `run_command`, `run_python_code`, etc.) automatically use the session's sandbox_id if not explicitly provided
+- Sandbox lifecycle is 3600 seconds (default TTL), after which a new sandbox is automatically created when needed
 - The server is stateless and does not maintain conversation history
 - Clients should maintain their own history and pass it in requests via the `history` parameter
+
+For detailed information about session-to-sandbox mapping, see [docs/SESSION_SANDBOX_MAPPING.md](docs/SESSION_SANDBOX_MAPPING.md)
+
+## GET /get_sandbox_id
+
+Query the sandbox_id associated with a session.
+
+### Headers
+
+- `X-Session-Id`: Session identifier (e.g., `sess_001`)
+
+### Response Format
+
+```json
+{
+  "sandbox_id": "abc123xyz"
+}
+```
+
+Or if no sandbox exists yet:
+
+```json
+{
+  "sandbox_id": null
+}
+```
+
+### Example Usage
+
+#### Using curl
+
+```bash
+curl http://localhost:8000/get_sandbox_id \
+  -H "X-Session-Id: sess_001"
+```
+
+#### Using Python
+
+```python
+import requests
+
+url = "http://localhost:8000/get_sandbox_id"
+headers = {
+    "X-Session-Id": "sess_001"
+}
+
+response = requests.get(url, headers=headers)
+print(response.json())
+# Output: {"sandbox_id": "xyz789"} or {"sandbox_id": null}
+```
 
 ## Health Check
 
