@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -361,22 +362,21 @@ async def upload_file(
     x_session_id: str = Header(..., alias="X-Session-Id"),
 ):
     """
-    Upload a file to the directory specified by the USER_FILES_DIR
-    environment variable.
+    Upload a file directly to the E2B sandbox for the given session.
     
     Args:
         file: The file to upload (from multipart/form-data)
         x_session_id: Session ID from header
     
     Returns:
-        JSON response with the file path on disk
-        Example: {"data": {"path": "/path/to/user_files/example.txt"}}
+        JSON response with the file path in the sandbox
+        Example: {"data": {"path": "/home/user/example.txt", "sandbox_id": "abc123"}}
     
     Note:
-        - Each X-Session-Id corresponds to a sandbox
+        - Each X-Session-Id corresponds to a session with a sandbox
+        - Files are uploaded directly to the E2B sandbox, not the API server
         - Sandbox lifecycle is 3600 seconds (default TTL)
         - The server is stateless and does not maintain conversation history
-        - Uses USER_FILES_DIR env var; defaults to /home/user/user_files
     """
     try:
         # Validate filename
@@ -384,11 +384,9 @@ async def upload_file(
             raise HTTPException(status_code=400, detail="Filename is required")
         
         # Sanitize filename to prevent path traversal attacks
-        # Remove any directory components and only keep the base filename
         safe_filename = os.path.basename(file.filename)
         
-        # Additional validation: reject filenames with path traversal attempts (defense-in-depth)
-        # Note: os.path.basename already handles this, but we check explicitly as an extra safety layer
+        # Additional validation
         if ".." in safe_filename or "/" in safe_filename or "\\" in safe_filename:
             raise HTTPException(
                 status_code=400, 
@@ -397,35 +395,109 @@ async def upload_file(
         
         logger.info(f"Received file upload request for session {x_session_id}: {safe_filename}")
         
-        # Create the target directory if it doesn't exist
-        user_files_dir = os.environ.get("USER_FILES_DIR", "/home/user/user_files")
-        target_dir = Path(user_files_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Construct the full file path using the sanitized filename
-        file_path = target_dir / safe_filename
-        
-        # Ensure the resolved path is still within the target directory (defense-in-depth)
-        # Note: This check is redundant given os.path.basename usage, but provides extra security
-        if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid file path: file must be uploaded to the designated directory"
+        # Get or create session
+        session_key = x_session_id
+        if session_key not in _sessions:
+            # Initialize session with default config
+            cfg = initialize_config()
+            main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
+                create_pipeline_components(cfg)
             )
-        
-        # Save the uploaded file
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        logger.info(f"File saved successfully: {file_path}")
-        
-        # Return the response in the required format
-        return {
-            "data": {
-                "path": str(file_path)
+            _sessions[session_key] = {
+                "main_agent_tool_manager": main_agent_tool_manager,
+                "sub_agent_tool_managers": sub_agent_tool_managers,
+                "output_formatter": output_formatter,
+                "cfg": cfg,
+                "sandbox_id": None,  # Will be created on first use
             }
-        }
+        
+        session = _sessions[session_key]
+        tool_manager = session["main_agent_tool_manager"]
+        
+        async def create_sandbox(tool_mgr):
+            """Create a new sandbox and persist sandbox_id in the session."""
+            logger.info(f"Creating new sandbox for session {x_session_id}")
+            result = await tool_mgr.execute_tool_call(
+                server_name="tool-python",
+                tool_name="create_sandbox",
+                arguments={"timeout": 3600}  # 1 hour TTL
+            )
+            if "result" in result and "sandbox_id:" in result["result"]:
+                created_id = result["result"].split("sandbox_id:")[-1].strip()
+                session["sandbox_id"] = created_id
+                logger.info(f"Created sandbox {created_id} for session {x_session_id}")
+                return created_id
+            raise Exception(f"Failed to create sandbox: {result}")
+        
+        async def upload_to_sandbox(target_sandbox_id: str, local_path: str):
+            sandbox_file_path = f"/home/user/{safe_filename}"
+            logger.info(
+                f"Uploading {local_path} to sandbox {target_sandbox_id} at {sandbox_file_path}"
+            )
+            upload_result = await tool_manager.execute_tool_call(
+                server_name="tool-python",
+                tool_name="upload_file_from_local_to_sandbox",
+                arguments={
+                    "sandbox_id": target_sandbox_id,
+                    "local_file_path": local_path,
+                    "sandbox_file_path": "/home/user"
+                }
+            )
+            if "result" in upload_result:
+                result_str = upload_result["result"]
+                if "[ERROR]" in result_str:
+                    raise Exception(result_str)
+                logger.info(f"File uploaded successfully to sandbox: {result_str}")
+                return sandbox_file_path
+            raise Exception(f"Upload failed: {upload_result}")
+        
+        # Get or create sandbox for this session
+        sandbox_id = session.get("sandbox_id")
+        if not sandbox_id:
+            try:
+                sandbox_id = await create_sandbox(tool_manager)
+            except Exception as e:
+                logger.error(f"Error creating sandbox: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to create sandbox: {str(e)}")
+        
+        # Save file to temporary location first
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            try:
+                sandbox_file_path = await upload_to_sandbox(sandbox_id, tmp_file_path)
+            except Exception as e:
+                error_msg = str(e)
+                if sandbox_id and (
+                    "Failed to connect to sandbox" in error_msg
+                    or "sandbox does not exist" in error_msg
+                    or "Sandbox not found" in error_msg
+                ):
+                    logger.warning(
+                        f"Sandbox {sandbox_id} unavailable for session {x_session_id}; creating a new sandbox and retrying"
+                    )
+                    session["sandbox_id"] = None
+                    sandbox_id = await create_sandbox(tool_manager)
+                    sandbox_file_path = await upload_to_sandbox(sandbox_id, tmp_file_path)
+                else:
+                    raise
+            
+            return {
+                "data": {
+                    "path": sandbox_file_path,
+                    "sandbox_id": sandbox_id
+                }
+            }
+        
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_file_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary file {tmp_file_path}: {e}")
     
     except HTTPException:
         # Re-raise HTTP exceptions as-is
