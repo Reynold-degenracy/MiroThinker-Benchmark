@@ -146,10 +146,17 @@ async def stream_generator(
             "sub_agent_tool_managers": sub_agent_tool_managers,
             "output_formatter": output_formatter,
             "cfg": cfg,
+            "sandbox_id": None,  # Track sandbox_id for session persistence
         }
     
     session = _sessions[session_key]
     cfg = session["cfg"]
+    
+    # Set default sandbox_id in tool managers if available
+    if session.get("sandbox_id"):
+        session["main_agent_tool_manager"].set_default_sandbox_id(session["sandbox_id"])
+        for sub_tool_manager in session["sub_agent_tool_managers"].values():
+            sub_tool_manager.set_default_sandbox_id(session["sandbox_id"])
     
     # Prepare task parameters
     task_id = f"api_{session_id}"
@@ -354,6 +361,34 @@ async def get_response(
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/get_sandbox_id")
+async def get_sandbox_id(
+    x_session_id: str = Header(..., alias="X-Session-Id"),
+):
+    """
+    Get the sandbox_id associated with the given session.
+    
+    Args:
+        x_session_id: Session ID from header
+    
+    Returns:
+        JSON response with the sandbox_id if available
+        Example: {"sandbox_id": "abc123"} or {"sandbox_id": null}
+    """
+    try:
+        session_key = x_session_id
+        session = _sessions.get(session_key)
+        
+        if not session:
+            return {"sandbox_id": None}
+        
+        return {"sandbox_id": session.get("sandbox_id")}
+    
+    except Exception as e:
+        logger.error(f"Error getting sandbox_id: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/upload_file")

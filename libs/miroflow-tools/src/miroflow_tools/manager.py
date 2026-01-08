@@ -58,6 +58,7 @@ class ToolManager(ToolManagerProtocol):
         self.browser_session = None
         self.tool_blacklist = tool_blacklist if tool_blacklist else set()
         self.task_log = None
+        self.default_sandbox_id = None  # Default sandbox_id for session persistence
 
     def set_task_log(self, task_log):
         """Set the task logger for structured logging."""
@@ -67,6 +68,15 @@ class ToolManager(ToolManagerProtocol):
             "info",
             "ToolManager | Initialization",
             f"ToolManager initialized, loaded servers: {list(self.server_dict.keys())}",
+        )
+
+    def set_default_sandbox_id(self, sandbox_id):
+        """Set the default sandbox_id for automatic injection into tool calls."""
+        self.default_sandbox_id = sandbox_id
+        self._log(
+            "info",
+            "ToolManager | Set Default Sandbox",
+            f"Default sandbox_id set to: {sandbox_id}",
         )
 
     def _log(self, level, step_name, message, metadata=None):
@@ -203,6 +213,29 @@ class ToolManager(ToolManagerProtocol):
         :param arguments: Tool arguments dictionary
         :return: Dictionary containing result or error
         """
+        
+        # Auto-inject default sandbox_id for tools that require it
+        SANDBOX_TOOLS = {
+            "run_command",
+            "run_python_code",
+            "upload_file_from_local_to_sandbox",
+            "download_file_from_internet_to_sandbox",
+            "download_file_from_sandbox_to_local",
+        }
+        
+        # If this is a sandbox tool and sandbox_id is not provided, inject the default one
+        if (
+            tool_name in SANDBOX_TOOLS
+            and "sandbox_id" not in arguments
+            and self.default_sandbox_id is not None
+        ):
+            arguments = dict(arguments)  # Create a copy to avoid modifying the original
+            arguments["sandbox_id"] = self.default_sandbox_id
+            self._log(
+                "info",
+                "ToolManager | Auto-inject Sandbox ID",
+                f"Automatically injecting sandbox_id '{self.default_sandbox_id}' for tool '{tool_name}'",
+            )
 
         # Original remote server call logic
         server_params = self.get_server_params(server_name)
