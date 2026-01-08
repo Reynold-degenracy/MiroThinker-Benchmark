@@ -448,6 +448,27 @@ async def upload_file(
                 if "[ERROR]" in result_str:
                     raise Exception(result_str)
                 logger.info(f"File uploaded successfully to sandbox: {result_str}")
+                
+                # Rename the uploaded file to the correct filename
+                # The uploaded file has the temporary filename, we need to rename it
+                uploaded_temp_name = os.path.basename(local_path)
+                if uploaded_temp_name != safe_filename:
+                    logger.info(f"Renaming uploaded file from {uploaded_temp_name} to {safe_filename}")
+                    rename_result = await tool_manager.execute_tool_call(
+                        server_name="tool-python",
+                        tool_name="run_command",
+                        arguments={
+                            "sandbox_id": target_sandbox_id,
+                            "command": f"mv /home/user/{uploaded_temp_name} /home/user/{safe_filename}"
+                        }
+                    )
+                    if "result" in rename_result:
+                        rename_str = rename_result["result"]
+                        if "[ERROR]" in rename_str:
+                            logger.warning(f"Failed to rename file: {rename_str}")
+                        else:
+                            logger.info(f"File renamed successfully to {safe_filename}")
+                
                 return sandbox_file_path
             raise Exception(f"Upload failed: {upload_result}")
         

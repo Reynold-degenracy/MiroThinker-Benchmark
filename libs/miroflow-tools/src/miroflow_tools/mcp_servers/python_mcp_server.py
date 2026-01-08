@@ -22,7 +22,7 @@ LOGS_DIR = os.environ.get(
 DEFAULT_TEMPLATE_ID = "1av7fdjfvcparqo8efq6"
 
 # DEFAULT CONFS
-DEFAULT_TIMEOUT = 600  # seconds
+DEFAULT_TIMEOUT = 60 * 60  # seconds
 # Maximum number of tokens that can be returned by the Python tool
 MAX_RESULT_LEN = 20_000
 # Maximum number of tokens allowed in an error message
@@ -97,7 +97,7 @@ async def create_sandbox(timeout: int = DEFAULT_TIMEOUT) -> str:
         The sandbox_id of the newly created sandbox. You should use this sandbox_id to run other tools in the sandbox.
     """
     max_retries = 5
-    timeout = min(timeout, DEFAULT_TIMEOUT)
+    timeout = min(timeout, DEFAULT_TIMEOUT) # idky but i'll let it be
     for attempt in range(1, max_retries + 1):
         sandbox = None
         try:
