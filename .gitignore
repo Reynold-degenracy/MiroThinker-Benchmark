@@ -219,5 +219,6 @@ data/
 
 .DS_Store
 
-
-apps/miroflow-agent/user_files/*
+# test scripts
+test_uploaded_file.sh
+test_upload_to_sandbox.sh
