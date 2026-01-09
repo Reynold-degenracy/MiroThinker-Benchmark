@@ -3,6 +3,7 @@
 
 import asyncio
 import dataclasses
+import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -205,7 +206,6 @@ class AnthropicClient(BaseClient):
         for block in accumulated_content:
             if block["type"] == "tool_use" and isinstance(block["input"], str):
                 try:
-                    import json
                     block["input"] = json.loads(block["input"])
                 except Exception as e:
                     logger.warning(f"Failed to parse tool input JSON: {e}")
@@ -340,7 +340,6 @@ class AnthropicClient(BaseClient):
         for block in accumulated_content:
             if block["type"] == "tool_use" and isinstance(block["input"], str):
                 try:
-                    import json
                     block["input"] = json.loads(block["input"])
                 except Exception as e:
                     logger.warning(f"Failed to parse tool input JSON: {e}")
