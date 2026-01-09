@@ -185,33 +185,26 @@ async def stream_generator(
                 
                 # Transform events to NDJSON format
                 if event_type == "tool_call":
-                    # Flush buffer before tool call
-                    if content_buffer:
-                        output = {
-                            "status": "answer",
-                            "data": content_buffer
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                        content_buffer = ""
-                    
                     tool_name = data.get("tool_name", "")
                     tool_input = data.get("tool_input", data.get("delta_input", {}))
                     
-                    # show_text tool is used to display answers
+                    # show_text tool is used to display answers, but we skip it during streaming
+                    # because the content is already being streamed via "message" events
+                    # This prevents duplication of content
                     if tool_name == "show_text":
-                        text = tool_input.get("text", "")
-                        if text:
-                            # Split by newlines to stream each part
-                            for line in text.split('\n'):
-                                if line:  # Skip empty lines
-                                    output = {
-                                        "status": "answer",
-                                        "data": line + '\n'
-                                    }
-                                    yield json.dumps(output, ensure_ascii=False) + "\n"
+                        # Skip show_text during streaming to avoid duplication
+                        pass
                     
                     # show_error is for errors, also treat as answer
                     elif tool_name == "show_error":
+                        # Flush buffer before error
+                        if content_buffer:
+                            output = {
+                                "status": "answer",
+                                "data": content_buffer
+                            }
+                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            content_buffer = ""
                         error_text = tool_input.get("error", "")
                         if error_text:
                             output = {
@@ -222,6 +215,15 @@ async def stream_generator(
                     
                     # Other tool calls are planning steps
                     else:
+                        # Flush buffer before plan steps to avoid mixing content
+                        if content_buffer:
+                            output = {
+                                "status": "answer",
+                                "data": content_buffer
+                            }
+                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            content_buffer = ""
+                        
                         if in_plan_phase:
                             current_step += 1
                             plan_text = f"Using tool: {tool_name}"
@@ -298,6 +300,15 @@ async def stream_generator(
                                         break
                 
                 elif event_type == "start_of_agent":
+                    # Flush buffer before starting agent
+                    if content_buffer:
+                        output = {
+                            "status": "answer",
+                            "data": content_buffer
+                        }
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        content_buffer = ""
+                    
                     # Starting an agent indicates planning
                     if in_plan_phase:
                         current_step += 1
@@ -310,6 +321,15 @@ async def stream_generator(
                         yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "start_of_workflow":
+                    # Flush buffer before workflow start
+                    if content_buffer:
+                        output = {
+                            "status": "answer",
+                            "data": content_buffer
+                        }
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        content_buffer = ""
+                    
                     # Workflow start
                     if in_plan_phase:
                         current_step += 1
