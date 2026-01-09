@@ -19,7 +19,7 @@ def test_api_structure():
         "POST /get_response endpoint defined": False,
         "POST /upload_file endpoint defined": False,
         "Health check endpoint defined": False,
-        "NDJSON streaming used": False,
+        "SSE streaming used": False,
         "Session management implemented": False,
         "File upload support (UploadFile)": False,
     }
@@ -48,9 +48,9 @@ def test_api_structure():
         if '@app.get("/health")' in content:
             checks["Health check endpoint defined"] = True
             
-        # Check for NDJSON streaming
-        if '"application/x-ndjson"' in content or 'application/x-ndjson' in content:
-            checks["NDJSON streaming used"] = True
+        # Check for SSE streaming
+        if '"text/event-stream"' in content or 'text/event-stream' in content or 'EventSourceResponse' in content:
+            checks["SSE streaming used"] = True
             
         # Check for session management
         if "X-Session-Id" in content and "_sessions" in content:
@@ -95,7 +95,7 @@ def test_response_format():
         {"status": "answer", "data": " Manus"},
     ]
     
-    print("\nExpected response format (NDJSON):")
+    print("\nExpected response format (SSE - Server-Sent Events):")
     print("-" * 50)
     for example in examples:
         # Verify each example is valid JSON
@@ -113,7 +113,7 @@ def test_response_format():
             return False
     
     print("-" * 50)
-    print("✓ Response format is valid NDJSON")
+    print("✓ Response format is valid JSON (for SSE)")
     return True
 
 

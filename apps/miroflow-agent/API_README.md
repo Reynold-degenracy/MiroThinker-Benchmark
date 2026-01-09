@@ -72,15 +72,21 @@ Submit a question and receive streaming responses.
 
 #### Response Format
 
-The response is streamed in NDJSON (Newline Delimited JSON) format:
+The response is streamed in SSE (Server-Sent Events) format with `Content-Type: text/event-stream`:
 
-```json
-{"status":"plan", "step": 1, "data":"Workflow started"}
-{"status":"plan", "step": 2, "data":"Using tool: search with input: {...}"}
-{"status":"answer", "data":"I am"}
-{"status":"answer", "data":" Manus"}
-{"status":"answer", "data":"\n"}
-{"status":"answer", "data":"The answer is..."}
+```
+data: {"status":"plan", "step": 1, "data":"Workflow started"}
+
+data: {"status":"plan", "step": 2, "data":"Using tool: search with input: {...}"}
+
+data: {"status":"answer", "data":"I am"}
+
+data: {"status":"answer", "data":" Manus"}
+
+data: {"status":"answer", "data":"\n"}
+
+data: {"status":"answer", "data":"The answer is..."}
+
 ```
 
 **Response Fields:**
