@@ -168,6 +168,18 @@ async def stream_generator(
         # Buffer for accumulating partial text for word-by-word streaming
         text_buffer = ""
         
+        def flush_buffer():
+            """Helper to flush any remaining text in buffer"""
+            nonlocal text_buffer
+            if text_buffer:
+                output = {
+                    "status": "answer",
+                    "data": text_buffer
+                }
+                text_buffer = ""
+                return json.dumps(output, ensure_ascii=False) + "\n"
+            return None
+        
         try:
             while True:
                 event = await stream_queue.get()
@@ -315,13 +327,9 @@ async def stream_generator(
                 
                 elif event_type == "end_of_workflow":
                     # Workflow end - flush any remaining text in buffer
-                    if text_buffer:
-                        output = {
-                            "status": "answer",
-                            "data": text_buffer
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                        text_buffer = ""
+                    result = flush_buffer()
+                    if result:
+                        yield result
                     # Signal completion
                     break
                 
@@ -334,12 +342,9 @@ async def stream_generator(
             yield json.dumps(error_output, ensure_ascii=False) + "\n"
         finally:
             # Flush any remaining buffered text
-            if text_buffer:
-                output = {
-                    "status": "answer",
-                    "data": text_buffer
-                }
-                yield json.dumps(output, ensure_ascii=False) + "\n"
+            result = flush_buffer()
+            if result:
+                yield result
     
     # Start pipeline execution in background
     async def run_pipeline():
