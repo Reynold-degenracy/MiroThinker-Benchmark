@@ -165,6 +165,9 @@ async def stream_generator(
         """Consume stream events and transform them"""
         nonlocal current_step
         
+        # Buffer for accumulating partial text for word-by-word streaming
+        text_buffer = ""
+        
         try:
             while True:
                 event = await stream_queue.get()
@@ -183,14 +186,32 @@ async def stream_generator(
                     if tool_name == "show_text":
                         text = tool_input.get("text", "")
                         if text:
-                            # Split by newlines to stream each part
-                            for line in text.split('\n'):
-                                if line:  # Skip empty lines
+                            # Stream word by word for typewriter effect
+                            # Process character by character to identify word boundaries
+                            i = 0
+                            while i < len(text):
+                                # Find the next word boundary (space, newline, etc.)
+                                if text[i] in ' \n\t':
+                                    # Send whitespace character
                                     output = {
                                         "status": "answer",
-                                        "data": line + '\n'
+                                        "data": text[i]
                                     }
                                     yield json.dumps(output, ensure_ascii=False) + "\n"
+                                    i += 1
+                                else:
+                                    # Find the end of the word
+                                    j = i
+                                    while j < len(text) and text[j] not in ' \n\t':
+                                        j += 1
+                                    # Send the word
+                                    word = text[i:j]
+                                    output = {
+                                        "status": "answer",
+                                        "data": word
+                                    }
+                                    yield json.dumps(output, ensure_ascii=False) + "\n"
+                                    i = j
                     
                     # show_error is for errors, also treat as answer
                     elif tool_name == "show_error":
@@ -225,11 +246,49 @@ async def stream_generator(
                     # Messages are assistant responses (answer phase)
                     delta_content = data.get("delta", {}).get("content", "")
                     if delta_content:
-                        output = {
-                            "status": "answer",
-                            "data": delta_content
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        # Add to buffer for word-by-word streaming
+                        text_buffer += delta_content
+                        
+                        # Extract complete words from buffer
+                        # Look for spaces to identify word boundaries
+                        while ' ' in text_buffer or '\n' in text_buffer:
+                            # Find the first space or newline
+                            space_idx = text_buffer.find(' ')
+                            newline_idx = text_buffer.find('\n')
+                            
+                            # Determine which comes first
+                            if space_idx == -1:
+                                split_idx = newline_idx
+                                delimiter = '\n'
+                            elif newline_idx == -1:
+                                split_idx = space_idx
+                                delimiter = ' '
+                            else:
+                                if space_idx < newline_idx:
+                                    split_idx = space_idx
+                                    delimiter = ' '
+                                else:
+                                    split_idx = newline_idx
+                                    delimiter = '\n'
+                            
+                            # Extract the word and send it
+                            word = text_buffer[:split_idx]
+                            if word:
+                                output = {
+                                    "status": "answer",
+                                    "data": word
+                                }
+                                yield json.dumps(output, ensure_ascii=False) + "\n"
+                            
+                            # Send the delimiter (space or newline)
+                            output = {
+                                "status": "answer",
+                                "data": delimiter
+                            }
+                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            
+                            # Remove processed part from buffer
+                            text_buffer = text_buffer[split_idx + 1:]
                 
                 elif event_type == "start_of_agent":
                     # Starting an agent indicates planning
@@ -255,7 +314,15 @@ async def stream_generator(
                         yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "end_of_workflow":
-                    # Workflow end - signal completion
+                    # Workflow end - flush any remaining text in buffer
+                    if text_buffer:
+                        output = {
+                            "status": "answer",
+                            "data": text_buffer
+                        }
+                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        text_buffer = ""
+                    # Signal completion
                     break
                 
         except Exception as e:
@@ -265,6 +332,14 @@ async def stream_generator(
                 "data": f"Error: {str(e)}"
             }
             yield json.dumps(error_output, ensure_ascii=False) + "\n"
+        finally:
+            # Flush any remaining buffered text
+            if text_buffer:
+                output = {
+                    "status": "answer",
+                    "data": text_buffer
+                }
+                yield json.dumps(output, ensure_ascii=False) + "\n"
     
     # Start pipeline execution in background
     async def run_pipeline():
