@@ -4,7 +4,8 @@
 import asyncio
 import dataclasses
 import logging
-from typing import Any, Dict, List, Tuple, Union
+import uuid
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tiktoken
 from anthropic import (
@@ -105,6 +106,141 @@ class AnthropicClient(BaseClient):
                 "warning", "LLM | Token Usage", "Warning: No valid usage_data received."
             )
 
+    async def _handle_streaming_response(
+        self, 
+        stream: Any, 
+        stream_queue: Optional[Any] = None
+    ) -> Any:
+        """
+        Handle streaming response from Anthropic API.
+        Accumulates the full response and sends deltas to stream_queue if provided.
+        
+        :param stream: The streaming response from Anthropic API
+        :param stream_queue: Optional queue for sending streaming updates
+        :return: A complete response object compatible with non-streaming response
+        """
+        # Accumulate response data
+        accumulated_content = []
+        stop_reason = None
+        usage_data = None
+        message_id = str(uuid.uuid4())
+        
+        try:
+            async for event in stream:
+                # Handle different event types in Anthropic streaming
+                if event.type == "message_start":
+                    # Contains usage data
+                    if hasattr(event, "message") and hasattr(event.message, "usage"):
+                        usage_data = event.message.usage
+                
+                elif event.type == "content_block_start":
+                    # New content block started
+                    block = event.content_block
+                    if block.type == "text":
+                        accumulated_content.append({
+                            "type": "text",
+                            "text": ""
+                        })
+                    elif block.type == "tool_use":
+                        accumulated_content.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": ""
+                        })
+                
+                elif event.type == "content_block_delta":
+                    # Content delta
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        # Text content streaming
+                        if accumulated_content and accumulated_content[-1]["type"] == "text":
+                            accumulated_content[-1]["text"] += delta.text
+                        
+                        # Send streaming update
+                        if stream_queue:
+                            try:
+                                await stream_queue.put({
+                                    "event": "message",
+                                    "data": {
+                                        "message_id": message_id,
+                                        "delta": {
+                                            "content": delta.text,
+                                        },
+                                    },
+                                })
+                            except Exception as e:
+                                logger.warning(f"Failed to send stream update: {e}")
+                    
+                    elif delta.type == "input_json_delta":
+                        # Tool input streaming
+                        if accumulated_content and accumulated_content[-1]["type"] == "tool_use":
+                            accumulated_content[-1]["input"] += delta.partial_json
+                
+                elif event.type == "content_block_stop":
+                    # Content block ended
+                    pass
+                
+                elif event.type == "message_delta":
+                    # Message-level delta (e.g., stop_reason)
+                    if hasattr(event.delta, "stop_reason"):
+                        stop_reason = event.delta.stop_reason
+                    if hasattr(event, "usage"):
+                        # Update usage with final token counts
+                        if usage_data:
+                            # Merge usage data
+                            usage_data.output_tokens = event.usage.output_tokens
+                        else:
+                            usage_data = event.usage
+                
+                elif event.type == "message_stop":
+                    # Streaming ended
+                    break
+        
+        except Exception as e:
+            logger.error(f"Error processing streaming response: {e}", exc_info=True)
+            raise
+        
+        # Parse tool use inputs from JSON strings
+        for block in accumulated_content:
+            if block["type"] == "tool_use" and isinstance(block["input"], str):
+                try:
+                    import json
+                    block["input"] = json.loads(block["input"])
+                except Exception as e:
+                    logger.warning(f"Failed to parse tool input JSON: {e}")
+                    block["input"] = {}
+        
+        # Construct a response object compatible with non-streaming response
+        class MockResponse:
+            def __init__(self, content, stop_reason, usage):
+                self.content = []
+                for block in content:
+                    if block["type"] == "text":
+                        class TextBlock:
+                            def __init__(self, text):
+                                self.type = "text"
+                                self.text = text
+                        self.content.append(TextBlock(block["text"]))
+                    elif block["type"] == "tool_use":
+                        class ToolUseBlock:
+                            def __init__(self, id, name, input_data):
+                                self.type = "tool_use"
+                                self.id = id
+                                self.name = name
+                                self.input = input_data
+                        self.content.append(ToolUseBlock(block["id"], block["name"], block["input"]))
+                
+                self.stop_reason = stop_reason or "end_turn"
+                self.usage = usage
+                self.id = str(uuid.uuid4())
+                self.model = None
+                self.role = "assistant"
+                self.type = "message"
+        
+        response = MockResponse(accumulated_content, stop_reason, usage_data)
+        return response
+
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(5))
     async def _create_message(
         self,
@@ -112,11 +248,13 @@ class AnthropicClient(BaseClient):
         messages_history: List[Dict[str, Any]],
         tools_definitions,
         keep_tool_result: int = -1,
+        stream_queue: Optional[Any] = None,
     ):
         """
-        Send message to Anthropic API.
+        Send message to Anthropic API with streaming support.
         :param system_prompt: System prompt string.
         :param messages_history: Message history list.
+        :param stream_queue: Optional queue for streaming updates.
         :return: Anthropic API response object or None (if error occurs).
         """
         self.task_log.log_step(
@@ -136,7 +274,7 @@ class AnthropicClient(BaseClient):
 
         try:
             if self.async_client:
-                response = await self.client.messages.create(
+                stream = await self.client.messages.create(
                     model=self.model_name,
                     temperature=self.temperature,
                     top_p=self.top_p if self.top_p != 1.0 else NOT_GIVEN,
@@ -150,10 +288,10 @@ class AnthropicClient(BaseClient):
                         }
                     ],
                     messages=processed_messages,
-                    stream=False,
+                    stream=True,  # Enable streaming
                 )
             else:
-                response = self.client.messages.create(
+                stream = self.client.messages.create(
                     model=self.model_name,
                     temperature=self.temperature,
                     top_p=self.top_p if self.top_p != 1.0 else NOT_GIVEN,
@@ -167,8 +305,12 @@ class AnthropicClient(BaseClient):
                         }
                     ],
                     messages=processed_messages,
-                    stream=False,
+                    stream=True,  # Enable streaming
                 )
+            
+            # Process streaming response
+            response = await self._handle_streaming_response(stream, stream_queue)
+            
             self._update_token_usage(getattr(response, "usage", None))
             self.task_log.log_step(
                 "info",

@@ -328,6 +328,7 @@ class Orchestrator:
                 step_id=step_id,
                 task_log=self.task_log,
                 agent_type=agent_type,
+                stream_queue=self.stream_queue,  # Pass stream_queue for streaming
             )
             if ErrorBox.is_error_box(response):
                 await self._stream_show_error(str(response))
