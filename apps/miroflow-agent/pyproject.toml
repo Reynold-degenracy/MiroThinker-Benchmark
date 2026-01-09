@@ -49,6 +49,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "httpx[socks]>=0.28.1",
+    "sse-starlette>=2.1.0",
 ]
 
 [build-system]

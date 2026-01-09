@@ -17,6 +17,7 @@ from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 from src.core.pipeline import create_pipeline_components, execute_task_pipeline
 from src.logging.task_logger import bootstrap_logger
@@ -103,11 +104,11 @@ async def stream_generator(
     config_overrides: Optional[Dict[str, str]] = None,
 ):
     """
-    Generate streaming responses in NDJSON format.
+    Generate streaming responses in SSE (Server-Sent Events) format.
     
     Transforms internal streaming events to the required format:
-    - {"status":"plan", "step": 1, "data":"..."}
-    - {"status":"answer", "data":"..."}
+    - data: {"status":"plan", "step": 1, "data":"..."}
+    - data: {"status":"answer", "data":"..."}
     
     Args:
         query: User query
@@ -306,9 +307,9 @@ async def get_response(
         x_session_id: Session ID from header
     
     Returns:
-        StreamingResponse with NDJSON format:
-        - {"status":"plan", "step": 1, "data":"..."}
-        - {"status":"answer", "data":"..."}
+        EventSourceResponse with SSE format (Server-Sent Events):
+        - data: {"status":"plan", "step": 1, "data":"..."}
+        - data: {"status":"answer", "data":"..."}
     
     Note:
         The 'history' parameter is currently not used by the underlying
@@ -334,7 +335,7 @@ async def get_response(
         if request.config_overrides:
             logger.info(f"Config overrides provided: {request.config_overrides}")
         
-        return StreamingResponse(
+        return EventSourceResponse(
             stream_generator(
                 query=request.query,
                 history=request.history,
@@ -342,7 +343,8 @@ async def get_response(
                 session_id=x_session_id,
                 config_overrides=request.config_overrides,
             ),
-            media_type="application/x-ndjson",
+            media_type="text/event-stream",
+            sep="\n",
         )
     
     except Exception as e:
