@@ -5,7 +5,7 @@ LLM_MODEL=${LLM_MODEL:-"qwen/qwen3-32b"}
 BASE_URL=${BASE_URL:-$OPENAI_BASE_URL}
 
 # Configuration parameters
-NUM_RUNS=${NUM_RUNS:-8}
+NUM_RUNS=${NUM_RUNS:-2}
 BENCHMARK_NAME="gaia-validation-text-103"
 LLM_PROVIDER=${LLM_PROVIDER:-"qwen"}
 AGENT_SET=${AGENT_SET:-"single_agent_keep5"}

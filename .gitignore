@@ -220,5 +220,4 @@ data/
 .DS_Store
 
 # test scripts
-test_uploaded_file.sh
-test_upload_to_sandbox.sh
+test_*.sh
