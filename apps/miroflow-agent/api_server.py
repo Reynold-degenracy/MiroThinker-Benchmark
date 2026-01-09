@@ -344,7 +344,6 @@ async def get_response(
                 config_overrides=request.config_overrides,
             ),
             media_type="text/event-stream",
-            sep="\n",
         )
     
     except Exception as e:
