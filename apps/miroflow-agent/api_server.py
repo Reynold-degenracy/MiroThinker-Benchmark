@@ -164,20 +164,10 @@ async def stream_generator(
         """Consume stream events and transform them"""
         nonlocal current_step
         
-        # Buffer for more natural streaming
-        content_buffer = ""
-        
         try:
             while True:
                 event = await stream_queue.get()
                 if event is None:  # End of stream signal
-                    # Flush any remaining buffered content
-                    if content_buffer:
-                        output = {
-                            "status": "answer",
-                            "data": content_buffer
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
                     break
                 
                 event_type = event.get("event")
@@ -197,14 +187,6 @@ async def stream_generator(
                     
                     # show_error is for errors, also treat as answer
                     elif tool_name == "show_error":
-                        # Flush buffer before error
-                        if content_buffer:
-                            output = {
-                                "status": "answer",
-                                "data": content_buffer
-                            }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
-                            content_buffer = ""
                         error_text = tool_input.get("error", "")
                         if error_text:
                             output = {
@@ -215,15 +197,6 @@ async def stream_generator(
                     
                     # Other tool calls are planning steps
                     else:
-                        # Flush buffer before plan steps to avoid mixing content
-                        if content_buffer:
-                            output = {
-                                "status": "answer",
-                                "data": content_buffer
-                            }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
-                            content_buffer = ""
-                        
                         if in_plan_phase:
                             current_step += 1
                             plan_text = f"Using tool: {tool_name}"
@@ -245,70 +218,15 @@ async def stream_generator(
                     # Messages are assistant responses (answer phase)
                     delta_content = data.get("delta", {}).get("content", "")
                     if delta_content:
-                        content_buffer += delta_content
-                        
-                        # Send buffered content at natural boundaries for better readability
-                        # Check for natural break points: spaces, newlines, or punctuation followed by space
-                        while content_buffer:
-                            # Find natural break points
-                            # Priority: newline > sentence end (. ! ? followed by space or end) > word boundary (space)
-                            sent_boundary = -1
-                            for punct in ['\n', '。\n', '！\n', '？\n', '.\n', '!\n', '?\n']:
-                                idx = content_buffer.find(punct)
-                                if idx >= 0:
-                                    sent_boundary = idx + len(punct)
-                                    break
-                            
-                            if sent_boundary > 0:
-                                # Send up to and including the boundary
-                                chunk = content_buffer[:sent_boundary]
-                                content_buffer = content_buffer[sent_boundary:]
-                                output = {
-                                    "status": "answer",
-                                    "data": chunk
-                                }
-                                yield json.dumps(output, ensure_ascii=False) + "\n"
-                            else:
-                                # Check for sentence end without newline
-                                for pattern in ['. ', '。 ', '! ', '！ ', '? ', '？ ']:
-                                    idx = content_buffer.find(pattern)
-                                    if idx >= 0 and idx + len(pattern) <= len(content_buffer):
-                                        sent_boundary = idx + len(pattern)
-                                        break
-                                
-                                if sent_boundary > 0:
-                                    chunk = content_buffer[:sent_boundary]
-                                    content_buffer = content_buffer[sent_boundary:]
-                                    output = {
-                                        "status": "answer",
-                                        "data": chunk
-                                    }
-                                    yield json.dumps(output, ensure_ascii=False) + "\n"
-                                else:
-                                    # Check for word boundary (space)
-                                    space_idx = content_buffer.rfind(' ')
-                                    if space_idx > 0 and len(content_buffer) > 20:  # Only split if buffer is getting long
-                                        chunk = content_buffer[:space_idx + 1]
-                                        content_buffer = content_buffer[space_idx + 1:]
-                                        output = {
-                                            "status": "answer",
-                                            "data": chunk
-                                        }
-                                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                                    else:
-                                        # Buffer more content
-                                        break
-                
-                elif event_type == "start_of_agent":
-                    # Flush buffer before starting agent
-                    if content_buffer:
+                        # Send content immediately for real-time streaming
+                        # No buffering - stream each token/chunk as it arrives from LLM
                         output = {
                             "status": "answer",
-                            "data": content_buffer
+                            "data": delta_content
                         }
                         yield json.dumps(output, ensure_ascii=False) + "\n"
-                        content_buffer = ""
-                    
+                
+                elif event_type == "start_of_agent":
                     # Starting an agent indicates planning
                     if in_plan_phase:
                         current_step += 1
@@ -321,15 +239,6 @@ async def stream_generator(
                         yield json.dumps(output, ensure_ascii=False) + "\n"
                 
                 elif event_type == "start_of_workflow":
-                    # Flush buffer before workflow start
-                    if content_buffer:
-                        output = {
-                            "status": "answer",
-                            "data": content_buffer
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                        content_buffer = ""
-                    
                     # Workflow start
                     if in_plan_phase:
                         current_step += 1
