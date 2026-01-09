@@ -508,8 +508,7 @@ async def upload_file(
             
             return {
                 "data": {
-                    "path": sandbox_file_path,
-                    "sandbox_id": sandbox_id
+                    "path": sandbox_file_path
                 }
             }
         

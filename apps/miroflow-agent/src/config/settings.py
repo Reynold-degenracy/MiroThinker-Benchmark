@@ -195,6 +195,11 @@ def create_mcp_server_parameters(cfg: DictConfig, agent_cfg: DictConfig):
         agent_cfg.get("tools", None) is not None
         and "tool-reasoning" in agent_cfg["tools"]
     ):
+        # Only pass Anthropic env if provider is anthropic
+        reasoning_env = {}
+        if cfg.llm.provider == "anthropic":
+            reasoning_env["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
+            reasoning_env["ANTHROPIC_BASE_URL"] = ANTHROPIC_BASE_URL
         configs.append(
             {
                 "name": "tool-reasoning",
@@ -204,10 +209,7 @@ def create_mcp_server_parameters(cfg: DictConfig, agent_cfg: DictConfig):
                         "-m",
                         "miroflow_tools.mcp_servers.reasoning_mcp_server",
                     ],
-                    env={
-                        "ANTHROPIC_API_KEY": ANTHROPIC_API_KEY,
-                        "ANTHROPIC_BASE_URL": ANTHROPIC_BASE_URL,
-                    },
+                    env=reasoning_env,
                 ),
             }
         )
