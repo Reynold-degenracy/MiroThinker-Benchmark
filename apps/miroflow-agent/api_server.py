@@ -14,7 +14,6 @@ from typing import Dict, List, Optional
 
 import hydra
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -177,7 +176,7 @@ async def stream_generator(
                     "data": text_buffer
                 }
                 text_buffer = ""
-                return json.dumps(output, ensure_ascii=False) + "\n"
+                return json.dumps(output, ensure_ascii=False)
             return None
         
         try:
@@ -209,7 +208,7 @@ async def stream_generator(
                                         "status": "answer",
                                         "data": text[i]
                                     }
-                                    yield json.dumps(output, ensure_ascii=False) + "\n"
+                                    yield json.dumps(output, ensure_ascii=False)
                                     i += 1
                                 else:
                                     # Find the end of the word
@@ -222,7 +221,7 @@ async def stream_generator(
                                         "status": "answer",
                                         "data": word
                                     }
-                                    yield json.dumps(output, ensure_ascii=False) + "\n"
+                                    yield json.dumps(output, ensure_ascii=False)
                                     i = j
                     
                     # show_error is for errors, also treat as answer
@@ -233,7 +232,7 @@ async def stream_generator(
                                 "status": "answer",
                                 "data": f"Error: {error_text}"
                             }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            yield json.dumps(output, ensure_ascii=False)
                     
                     # Other tool calls are planning steps
                     else:
@@ -252,7 +251,7 @@ async def stream_generator(
                                 "step": current_step,
                                 "data": plan_text
                             }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            yield json.dumps(output, ensure_ascii=False)
                 
                 elif event_type == "message":
                     # Messages are assistant responses (answer phase)
@@ -262,26 +261,20 @@ async def stream_generator(
                         text_buffer += delta_content
                         
                         # Extract complete words from buffer
-                        # Look for spaces to identify word boundaries
-                        while ' ' in text_buffer or '\n' in text_buffer:
-                            # Find the first space or newline
+                        # Look for spaces, newlines, and tabs to identify word boundaries
+                        while ' ' in text_buffer or '\n' in text_buffer or '\t' in text_buffer:
+                            # Find the first space, newline, or tab
                             space_idx = text_buffer.find(' ')
                             newline_idx = text_buffer.find('\n')
+                            tab_idx = text_buffer.find('\t')
                             
-                            # Determine which comes first
-                            if space_idx == -1:
-                                split_idx = newline_idx
-                                delimiter = '\n'
-                            elif newline_idx == -1:
-                                split_idx = space_idx
-                                delimiter = ' '
-                            else:
-                                if space_idx < newline_idx:
-                                    split_idx = space_idx
-                                    delimiter = ' '
-                                else:
-                                    split_idx = newline_idx
-                                    delimiter = '\n'
+                            # Filter out -1 values and find the minimum
+                            indices = [idx for idx in [space_idx, newline_idx, tab_idx] if idx != -1]
+                            if not indices:
+                                break
+                            
+                            split_idx = min(indices)
+                            delimiter = text_buffer[split_idx]
                             
                             # Extract the word and send it
                             word = text_buffer[:split_idx]
@@ -290,14 +283,14 @@ async def stream_generator(
                                     "status": "answer",
                                     "data": word
                                 }
-                                yield json.dumps(output, ensure_ascii=False) + "\n"
+                                yield json.dumps(output, ensure_ascii=False)
                             
-                            # Send the delimiter (space or newline)
+                            # Send the delimiter (space, newline, or tab)
                             output = {
                                 "status": "answer",
                                 "data": delimiter
                             }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            yield json.dumps(output, ensure_ascii=False)
                             
                             # Remove processed part from buffer
                             text_buffer = text_buffer[split_idx + 1:]
@@ -312,7 +305,7 @@ async def stream_generator(
                             "step": current_step,
                             "data": f"Starting agent: {agent_name}"
                         }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        yield json.dumps(output, ensure_ascii=False)
                 
                 elif event_type == "start_of_workflow":
                     # Workflow start
@@ -323,7 +316,7 @@ async def stream_generator(
                             "step": current_step,
                             "data": "Workflow started"
                         }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                        yield json.dumps(output, ensure_ascii=False)
                 
                 elif event_type == "end_of_workflow":
                     # Workflow end - flush any remaining text in buffer
@@ -339,7 +332,7 @@ async def stream_generator(
                 "status": "answer",
                 "data": f"Error: {str(e)}"
             }
-            yield json.dumps(error_output, ensure_ascii=False) + "\n"
+            yield json.dumps(error_output, ensure_ascii=False)
         finally:
             # Flush any remaining buffered text
             result = flush_buffer()
