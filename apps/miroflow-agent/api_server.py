@@ -60,48 +60,30 @@ class SessionAwareSandboxManager:
         async with self._sandbox_creation_lock:
             sandbox_id = self.session_dict.get("sandbox_id")
             
+            # If sandbox_id exists, trust it and return directly
+            # If it's actually expired/unavailable, the tool call will fail
+            # and we'll handle that in execute_tool_call
             if sandbox_id:
-                # Verify the sandbox is still accessible
-                try:
-                    test_result = await self.tool_manager.execute_tool_call(
-                        server_name="tool-python",
-                        tool_name="run_command",
-                        arguments={
-                            "sandbox_id": sandbox_id,
-                            "command": "echo test"
-                        }
-                    )
-                    # If no error, sandbox is accessible
-                    if "error" not in test_result or "[ERROR]" not in str(test_result.get("result", "")):
-                        logger.info(f"Reusing existing sandbox {sandbox_id}")
-                        return sandbox_id
-                    else:
-                        logger.warning(f"Existing sandbox {sandbox_id} is no longer accessible, creating new one")
-                        self.session_dict["sandbox_id"] = None
-                        sandbox_id = None
-                except Exception as e:
-                    logger.warning(f"Failed to verify sandbox {sandbox_id}: {e}, creating new one")
-                    self.session_dict["sandbox_id"] = None
-                    sandbox_id = None
+                logger.info(f"Reusing existing sandbox {sandbox_id}")
+                return sandbox_id
             
-            if not sandbox_id:
-                # Create a new sandbox
-                logger.info("Creating new sandbox for session")
-                result = await self.tool_manager.execute_tool_call(
-                    server_name="tool-python",
-                    tool_name="create_sandbox",
-                    arguments={"timeout": 3600}  # 1 hour TTL
-                )
-                
-                if "result" in result and "sandbox_id:" in result["result"]:
-                    sandbox_id = result["result"].split("sandbox_id:")[-1].strip()
-                    self.session_dict["sandbox_id"] = sandbox_id
-                    logger.info(f"Created new sandbox {sandbox_id} for session")
-                    return sandbox_id
-                else:
-                    raise Exception(f"Failed to create sandbox: {result}")
+            # Create a new sandbox
+            logger.info("Creating new sandbox for session")
+            result = await self.tool_manager.execute_tool_call(
+                server_name="tool-python",
+                tool_name="create_sandbox",
+                arguments={"timeout": 3600}  # 1 hour TTL
+            )
             
-            return sandbox_id
+            if "result" in result and "sandbox_id:" in result["result"]:
+                sandbox_id = result["result"].split("sandbox_id:")[-1].strip()
+                self.session_dict["sandbox_id"] = sandbox_id
+                logger.info(f"Created new sandbox {sandbox_id} for session")
+                return sandbox_id
+            else:
+                # Check for error field for more robust error detection
+                error_msg = result.get("error", str(result))
+                raise Exception(f"Failed to create sandbox: {error_msg}")
     
     def _needs_sandbox_id(self, tool_name: str, arguments: dict) -> bool:
         """
@@ -151,11 +133,66 @@ class SessionAwareSandboxManager:
                 # Let the tool call proceed without sandbox_id, it will fail with appropriate error
         
         # Delegate to the underlying tool manager
-        return await self.tool_manager.execute_tool_call(
+        result = await self.tool_manager.execute_tool_call(
             server_name=server_name,
             tool_name=tool_name,
             arguments=arguments
         )
+        
+        # If sandbox-related tool call failed due to sandbox unavailability, recreate and retry once
+        if server_name == "tool-python" and self._is_sandbox_error(result):
+            sandbox_id = self.session_dict.get("sandbox_id")
+            if sandbox_id:
+                logger.warning(f"Sandbox {sandbox_id} is unavailable, recreating and retrying...")
+                self.session_dict["sandbox_id"] = None
+                
+                # Retry with new sandbox
+                try:
+                    new_sandbox_id = await self._ensure_sandbox_exists()
+                    arguments = {**arguments, "sandbox_id": new_sandbox_id}
+                    logger.info(f"Retrying with new sandbox {new_sandbox_id}")
+                    result = await self.tool_manager.execute_tool_call(
+                        server_name=server_name,
+                        tool_name=tool_name,
+                        arguments=arguments
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to recreate sandbox and retry: {e}", exc_info=True)
+        
+        return result
+    
+    def _is_sandbox_error(self, result: dict) -> bool:
+        """
+        Check if a tool call result indicates a sandbox connectivity error.
+        
+        Args:
+            result: The result from a tool call
+            
+        Returns:
+            True if this is a sandbox unavailability error
+        """
+        # Check for error field
+        if "error" in result:
+            error_msg = str(result["error"]).lower()
+            return any(phrase in error_msg for phrase in [
+                "failed to connect to sandbox",
+                "sandbox does not exist",
+                "sandbox not found",
+                "connection refused"
+            ])
+        
+        # Check for [ERROR] in result field (format used by Python MCP server)
+        if "result" in result:
+            result_str = str(result["result"])
+            if "[ERROR]" in result_str:
+                result_lower = result_str.lower()
+                return any(phrase in result_lower for phrase in [
+                    "failed to connect to sandbox",
+                    "sandbox does not exist",
+                    "sandbox not found"
+                ])
+        
+        return False
     
     def __getattr__(self, name):
         """

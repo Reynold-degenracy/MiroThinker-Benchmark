@@ -19,7 +19,7 @@ The `SessionAwareSandboxManager` class automatically:
 1. **Creates a sandbox on first use**: When any Python tool is called for the first time in a session, a sandbox is automatically created
 2. **Persists sandbox_id per session**: The sandbox ID is stored in the session dict and reused for all subsequent tool calls
 3. **Auto-injects sandbox_id**: Python tool calls automatically receive the session's sandbox_id without explicit specification
-4. **Handles sandbox expiry**: If a sandbox becomes unavailable, it's automatically recreated on the next tool call
+4. **Handles sandbox expiry**: If a sandbox becomes unavailable, it's automatically recreated on the next tool call (with single retry)
 
 ## Implementation Details
 
@@ -40,12 +40,29 @@ class SessionAwareSandboxManager:
             sandbox_id = await self._ensure_sandbox_exists()
             arguments = {**arguments, "sandbox_id": sandbox_id}
         
-        return await self.tool_manager.execute_tool_call(
+        result = await self.tool_manager.execute_tool_call(
             server_name=server_name,
             tool_name=tool_name,
             arguments=arguments
         )
+        
+        # If sandbox error, recreate and retry once
+        if server_name == "tool-python" and self._is_sandbox_error(result):
+            self.session_dict["sandbox_id"] = None
+            new_sandbox_id = await self._ensure_sandbox_exists()
+            arguments = {**arguments, "sandbox_id": new_sandbox_id}
+            result = await self.tool_manager.execute_tool_call(...)
+        
+        return result
 ```
+
+### Optimization: Lazy Verification
+
+The implementation uses **lazy verification** for performance:
+- Sandbox existence is **not** verified on every tool call
+- Instead, sandbox_id is trusted until a tool call fails
+- On failure, sandbox is automatically recreated and the call is retried once
+- This avoids unnecessary verification overhead while maintaining fault tolerance
 
 ### Tools with Auto-Injection
 
