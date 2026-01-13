@@ -178,18 +178,12 @@ async def stream_generator(
                     tool_name = data.get("tool_name", "")
                     tool_input = data.get("tool_input", data.get("delta_input", {}))
                     
-                    # show_text tool is used to display answers
+                    # show_text tool is used to display answers, but we skip it during streaming
+                    # because the content is already being streamed via "message" events
+                    # This prevents duplication of content
                     if tool_name == "show_text":
-                        text = tool_input.get("text", "")
-                        if text:
-                            # Split by newlines to stream each part
-                            for line in text.split('\n'):
-                                if line:  # Skip empty lines
-                                    output = {
-                                        "status": "answer",
-                                        "data": line + '\n'
-                                    }
-                                    yield json.dumps(output, ensure_ascii=False) + "\n"
+                        # Skip show_text during streaming to avoid duplication
+                        pass
                     
                     # show_error is for errors, also treat as answer
                     elif tool_name == "show_error":
@@ -224,6 +218,8 @@ async def stream_generator(
                     # Messages are assistant responses (answer phase)
                     delta_content = data.get("delta", {}).get("content", "")
                     if delta_content:
+                        # Send content immediately for real-time streaming
+                        # No buffering - stream each token/chunk as it arrives from LLM
                         output = {
                             "status": "answer",
                             "data": delta_content

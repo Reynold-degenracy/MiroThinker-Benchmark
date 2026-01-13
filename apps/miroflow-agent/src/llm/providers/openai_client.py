@@ -4,7 +4,8 @@
 import asyncio
 import dataclasses
 import logging
-from typing import Any, Dict, List, Tuple, Union
+import uuid
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tiktoken
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, DefaultHttpxClient, OpenAI
@@ -94,17 +95,297 @@ class OpenAIClient(BaseClient):
                 f"Output: {self.token_usage['total_output_tokens']}",
             )
 
+    async def _handle_streaming_response(
+        self, 
+        stream: Any, 
+        stream_queue: Optional[Any] = None
+    ) -> Any:
+        """
+        Handle streaming response from OpenAI API.
+        Accumulates the full response and sends deltas to stream_queue if provided.
+        
+        :param stream: The streaming response from OpenAI API
+        :param stream_queue: Optional queue for sending streaming updates
+        :return: A complete response object compatible with non-streaming response
+        """
+        # Accumulate response data
+        accumulated_content = ""
+        accumulated_tool_calls = []
+        finish_reason = None
+        usage_data = None
+        message_id = str(uuid.uuid4())
+        
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                    
+                choice = chunk.choices[0]
+                delta = choice.delta
+                
+                # Handle content streaming
+                if hasattr(delta, "content") and delta.content:
+                    accumulated_content += delta.content
+                    # Send streaming update
+                    if stream_queue:
+                        try:
+                            await stream_queue.put({
+                                "event": "message",
+                                "data": {
+                                    "message_id": message_id,
+                                    "delta": {
+                                        "content": delta.content,
+                                    },
+                                },
+                            })
+                        except Exception as e:
+                            logger.warning(f"Failed to send stream update: {e}")
+                
+                # Handle tool calls
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tool_call_delta in delta.tool_calls:
+                        # Ensure we have enough space in accumulated_tool_calls
+                        while len(accumulated_tool_calls) <= tool_call_delta.index:
+                            accumulated_tool_calls.append({
+                                "id": None,
+                                "type": "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": "",
+                                }
+                            })
+                        
+                        tool_call = accumulated_tool_calls[tool_call_delta.index]
+                        
+                        # Accumulate tool call data
+                        if tool_call_delta.id:
+                            tool_call["id"] = tool_call_delta.id
+                        if hasattr(tool_call_delta, "function"):
+                            if tool_call_delta.function.name:
+                                tool_call["function"]["name"] = tool_call_delta.function.name
+                            if tool_call_delta.function.arguments:
+                                tool_call["function"]["arguments"] += tool_call_delta.function.arguments
+                
+                # Handle finish reason
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                
+                # Handle usage data (typically in the last chunk)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage_data = chunk.usage
+        
+        except Exception as e:
+            logger.error(f"Error processing streaming response: {e}", exc_info=True)
+            raise
+        
+        # Construct a response object compatible with non-streaming response
+        # Create a mock response object that matches the structure of non-streaming response
+        class MockMessage:
+            def __init__(self, content, tool_calls):
+                self.role = "assistant"
+                self.content = content
+                self.tool_calls = tool_calls if tool_calls else None
+        
+        class MockChoice:
+            def __init__(self, message, finish_reason):
+                self.message = message
+                self.finish_reason = finish_reason
+                self.index = 0
+        
+        class MockResponse:
+            def __init__(self, choices, usage):
+                self.choices = choices
+                self.usage = usage
+                self.id = str(uuid.uuid4())
+                self.model = None
+                self.object = "chat.completion"
+        
+        # Convert accumulated tool calls to proper format
+        tool_calls_formatted = None
+        if accumulated_tool_calls and any(tc["id"] for tc in accumulated_tool_calls):
+            tool_calls_formatted = []
+            for tc in accumulated_tool_calls:
+                if tc["id"]:  # Only include tool calls that have an ID
+                    class MockToolCall:
+                        def __init__(self, id, type, function):
+                            self.id = id
+                            self.type = type
+                            self.function = function
+                    
+                    class MockFunction:
+                        def __init__(self, name, arguments):
+                            self.name = name
+                            self.arguments = arguments
+                    
+                    tool_calls_formatted.append(
+                        MockToolCall(
+                            id=tc["id"],
+                            type=tc["type"],
+                            function=MockFunction(
+                                name=tc["function"]["name"],
+                                arguments=tc["function"]["arguments"]
+                            )
+                        )
+                    )
+        
+        message = MockMessage(accumulated_content, tool_calls_formatted)
+        choice = MockChoice(message, finish_reason or "stop")
+        response = MockResponse([choice], usage_data)
+        
+        return response
+
+    async def _handle_sync_streaming_response(
+        self, 
+        stream: Any, 
+        stream_queue: Optional[Any] = None
+    ) -> Any:
+        """
+        Handle synchronous streaming response from OpenAI API.
+        Wraps sync stream iteration in async context.
+        
+        :param stream: The streaming response from OpenAI API (synchronous)
+        :param stream_queue: Optional queue for sending streaming updates
+        :return: A complete response object compatible with non-streaming response
+        """
+        # Accumulate response data
+        accumulated_content = ""
+        accumulated_tool_calls = []
+        finish_reason = None
+        usage_data = None
+        message_id = str(uuid.uuid4())
+        
+        try:
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                    
+                choice = chunk.choices[0]
+                delta = choice.delta
+                
+                # Handle content streaming
+                if hasattr(delta, "content") and delta.content:
+                    accumulated_content += delta.content
+                    # Send streaming update
+                    if stream_queue:
+                        try:
+                            await stream_queue.put({
+                                "event": "message",
+                                "data": {
+                                    "message_id": message_id,
+                                    "delta": {
+                                        "content": delta.content,
+                                    },
+                                },
+                            })
+                        except Exception as e:
+                            logger.warning(f"Failed to send stream update: {e}")
+                
+                # Handle tool calls
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tool_call_delta in delta.tool_calls:
+                        # Ensure we have enough space in accumulated_tool_calls
+                        while len(accumulated_tool_calls) <= tool_call_delta.index:
+                            accumulated_tool_calls.append({
+                                "id": None,
+                                "type": "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": "",
+                                }
+                            })
+                        
+                        tool_call = accumulated_tool_calls[tool_call_delta.index]
+                        
+                        # Accumulate tool call data
+                        if tool_call_delta.id:
+                            tool_call["id"] = tool_call_delta.id
+                        if hasattr(tool_call_delta, "function"):
+                            if tool_call_delta.function.name:
+                                tool_call["function"]["name"] = tool_call_delta.function.name
+                            if tool_call_delta.function.arguments:
+                                tool_call["function"]["arguments"] += tool_call_delta.function.arguments
+                
+                # Handle finish reason
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                
+                # Handle usage data (typically in the last chunk)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage_data = chunk.usage
+        
+        except Exception as e:
+            logger.error(f"Error processing sync streaming response: {e}", exc_info=True)
+            raise
+        
+        # Construct a response object compatible with non-streaming response
+        # Create a mock response object that matches the structure of non-streaming response
+        class MockMessage:
+            def __init__(self, content, tool_calls):
+                self.role = "assistant"
+                self.content = content
+                self.tool_calls = tool_calls if tool_calls else None
+        
+        class MockChoice:
+            def __init__(self, message, finish_reason):
+                self.message = message
+                self.finish_reason = finish_reason
+                self.index = 0
+        
+        class MockResponse:
+            def __init__(self, choices, usage):
+                self.choices = choices
+                self.usage = usage
+                self.id = str(uuid.uuid4())
+                self.model = None
+                self.object = "chat.completion"
+        
+        # Convert accumulated tool calls to proper format
+        tool_calls_formatted = None
+        if accumulated_tool_calls and any(tc["id"] for tc in accumulated_tool_calls):
+            tool_calls_formatted = []
+            for tc in accumulated_tool_calls:
+                if tc["id"]:  # Only include tool calls that have an ID
+                    class MockToolCall:
+                        def __init__(self, id, type, function):
+                            self.id = id
+                            self.type = type
+                            self.function = function
+                    
+                    class MockFunction:
+                        def __init__(self, name, arguments):
+                            self.name = name
+                            self.arguments = arguments
+                    
+                    tool_calls_formatted.append(
+                        MockToolCall(
+                            id=tc["id"],
+                            type=tc["type"],
+                            function=MockFunction(
+                                name=tc["function"]["name"],
+                                arguments=tc["function"]["arguments"]
+                            )
+                        )
+                    )
+        
+        message = MockMessage(accumulated_content, tool_calls_formatted)
+        choice = MockChoice(message, finish_reason or "stop")
+        response = MockResponse([choice], usage_data)
+        
+        return response
+
     async def _create_message(
         self,
         system_prompt: str,
         messages_history: List[Dict[str, Any]],
         tools_definitions,
         keep_tool_result: int = -1,
+        stream_queue: Optional[Any] = None,
     ):
         """
-        Send message to OpenAI API.
+        Send message to OpenAI API with streaming support.
         :param system_prompt: System prompt string.
         :param messages_history: Message history list.
+        :param stream_queue: Optional queue for streaming updates.
         :return: OpenAI API response object or None (if error occurs).
         """
 
@@ -148,7 +429,7 @@ class OpenAIClient(BaseClient):
                 "temperature": self.temperature,
                 "messages": messages_for_llm,
                 "tools": [],
-                "stream": False,
+                "stream": True,  # Enable streaming
                 "top_p": self.top_p,
                 "extra_body": {},
             }
@@ -169,9 +450,19 @@ class OpenAIClient(BaseClient):
 
             try:
                 if self.async_client:
-                    response = await self.client.chat.completions.create(**params)
+                    stream = await self.client.chat.completions.create(**params)
+                    # Process streaming response
+                    response = await self._handle_streaming_response(
+                        stream, stream_queue
+                    )
                 else:
-                    response = self.client.chat.completions.create(**params)
+                    # For sync client, we need to wrap in async
+                    stream = self.client.chat.completions.create(**params)
+                    # Convert sync stream to async by wrapping each iteration
+                    response = await self._handle_sync_streaming_response(
+                        stream, stream_queue
+                    )
+                
                 # Update token count
                 self._update_token_usage(getattr(response, "usage", None))
                 self.task_log.log_step(

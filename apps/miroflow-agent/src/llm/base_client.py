@@ -191,6 +191,7 @@ class BaseClient(ABC):
         step_id: int = 1,
         task_log: Optional["TaskLog"] = None,
         agent_type: str = "main",
+        stream_queue: Optional[Any] = None,
     ):
         """
         Call LLM to generate response, supports tool calls - unified implementation
@@ -202,6 +203,7 @@ class BaseClient(ABC):
                 message_history,
                 tool_definitions,
                 keep_tool_result=keep_tool_result,
+                stream_queue=stream_queue,
             )
 
         except Exception as e:
