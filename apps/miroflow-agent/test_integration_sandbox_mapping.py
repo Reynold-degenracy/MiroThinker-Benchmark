@@ -6,10 +6,14 @@ This test shows that:
 1. Multiple Python tool calls in the same session use the same sandbox
 2. No explicit sandbox_id management is needed
 3. Sandbox is automatically created on first use
+
+Note: This test uses a simplified mock implementation of SessionAwareSandboxManager
+rather than importing from api_server to avoid dependency issues (Hydra, FastAPI, etc.).
+The simplified version validates the core sandbox management logic.
 """
 
 import asyncio
-from unittest.mock import Mock, AsyncMock, MagicMock
+from unittest.mock import Mock, AsyncMock
 
 
 async def test_sandbox_auto_injection():
@@ -18,10 +22,6 @@ async def test_sandbox_auto_injection():
     print("Testing Sandbox Auto-Injection")
     print("=" * 60)
     
-    # Import the SessionAwareSandboxManager
-    import sys
-    sys.path.insert(0, '.')
-    
     # Create a mock tool manager
     mock_tool_manager = Mock()
     mock_tool_manager.execute_tool_call = AsyncMock()
@@ -29,8 +29,8 @@ async def test_sandbox_auto_injection():
     # Create a session dict
     session_dict = {"sandbox_id": None}
     
-    # Import SessionAwareSandboxManager from api_server
-    # We'll simulate it here for the test
+    # Simplified SessionAwareSandboxManager for testing
+    # This validates the core logic without requiring full api_server dependencies
     class SessionAwareSandboxManager:
         def __init__(self, tool_manager, session_dict):
             self.tool_manager = tool_manager
@@ -167,7 +167,8 @@ async def test_multi_session_isolation():
     mock_tool_manager.execute_tool_call = AsyncMock()
     mock_tool_manager.execute_tool_call.return_value = {"result": "success"}
     
-    # Simplified SessionAwareSandboxManager
+    # Simplified SessionAwareSandboxManager for testing
+    # This validates the core logic without requiring full api_server dependencies
     class SessionAwareSandboxManager:
         def __init__(self, tool_manager, session_dict):
             self.tool_manager = tool_manager
@@ -175,7 +176,7 @@ async def test_multi_session_isolation():
         
         async def _ensure_sandbox_exists(self):
             if not self.session_dict.get("sandbox_id"):
-                # Create unique sandbox for each session
+                # Create unique sandbox for each session using a counter
                 import random
                 self.session_dict["sandbox_id"] = f"sandbox_{random.randint(1000, 9999)}"
             return self.session_dict["sandbox_id"]

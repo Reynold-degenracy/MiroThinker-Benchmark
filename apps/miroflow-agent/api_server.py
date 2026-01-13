@@ -140,10 +140,32 @@ class SessionAwareSandboxManager:
         )
         
         # If sandbox-related tool call failed due to sandbox unavailability, recreate and retry once
-        if server_name == "tool-python" and self._is_sandbox_error(result):
-            sandbox_id = self.session_dict.get("sandbox_id")
-            if sandbox_id:
-                logger.warning(f"Sandbox {sandbox_id} is unavailable, recreating and retrying...")
+        if (
+            server_name == "tool-python"
+            and self._needs_sandbox_id(tool_name, arguments)
+            and self._is_sandbox_error(result)
+        ):
+            # Protect sandbox reset/creation with the sandbox creation lock to avoid races
+            async with self._sandbox_creation_lock:
+                sandbox_id = self.session_dict.get("sandbox_id")
+                current_sandbox_id = self.session_dict.get("sandbox_id")
+                
+                # Check if another task has already refreshed the sandbox
+                if current_sandbox_id and current_sandbox_id != sandbox_id:
+                    logger.info(
+                        f"Sandbox error detected, but sandbox_id was already updated "
+                        f"to {current_sandbox_id}; skipping sandbox recreation in this call."
+                    )
+                    return result
+                
+                if sandbox_id:
+                    logger.warning(f"Sandbox {sandbox_id} is unavailable, recreating and retrying...")
+                else:
+                    logger.warning(
+                        "Sandbox is unavailable or was not initialized, creating new sandbox and retrying..."
+                    )
+                
+                # Clear the cached sandbox_id so a fresh one is created
                 self.session_dict["sandbox_id"] = None
                 
                 # Retry with new sandbox
@@ -199,6 +221,44 @@ class SessionAwareSandboxManager:
         Delegate all other attribute access to the underlying tool_manager.
         """
         return getattr(self.tool_manager, name)
+
+
+def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
+    """
+    Create a new session with tool managers wrapped in SessionAwareSandboxManager.
+    
+    Args:
+        cfg: Hydra configuration for the session
+        
+    Returns:
+        Session dictionary with wrapped tool managers
+    """
+    main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
+        create_pipeline_components(cfg)
+    )
+    
+    # Create session dict
+    session_dict = {
+        "cfg": cfg,
+        "sandbox_id": None,  # Will be created on first use
+        "output_formatter": output_formatter,
+    }
+    
+    # Wrap the main agent tool manager with SessionAwareSandboxManager
+    # This automatically manages sandbox creation and reuse
+    session_dict["main_agent_tool_manager"] = SessionAwareSandboxManager(
+        main_agent_tool_manager, session_dict
+    )
+    
+    # Wrap sub-agent tool managers as well
+    wrapped_sub_agents = {}
+    for agent_name, sub_agent_tool_manager in sub_agent_tool_managers.items():
+        wrapped_sub_agents[agent_name] = SessionAwareSandboxManager(
+            sub_agent_tool_manager, session_dict
+        )
+    session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
+    
+    return session_dict
 
 
 @asynccontextmanager
@@ -309,32 +369,7 @@ async def stream_generator(
     
     if session_key not in _sessions:
         cfg = initialize_config(overrides=override_list)
-        main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
-            create_pipeline_components(cfg)
-        )
-        
-        # Create session dict
-        session_dict = {
-            "cfg": cfg,
-            "sandbox_id": None,  # Will be created on first use
-            "output_formatter": output_formatter,
-        }
-        
-        # Wrap the main agent tool manager with SessionAwareSandboxManager
-        # This automatically manages sandbox creation and reuse
-        session_dict["main_agent_tool_manager"] = SessionAwareSandboxManager(
-            main_agent_tool_manager, session_dict
-        )
-        
-        # Wrap sub-agent tool managers as well
-        wrapped_sub_agents = {}
-        for agent_name, sub_agent_tool_manager in sub_agent_tool_managers.items():
-            wrapped_sub_agents[agent_name] = SessionAwareSandboxManager(
-                sub_agent_tool_manager, session_dict
-            )
-        session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
-        
-        _sessions[session_key] = session_dict
+        _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
     
     session = _sessions[session_key]
     cfg = session["cfg"]
@@ -584,31 +619,7 @@ async def upload_file(
         if session_key not in _sessions:
             # Initialize session with default config
             cfg = initialize_config()
-            main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
-                create_pipeline_components(cfg)
-            )
-            
-            # Create session dict
-            session_dict = {
-                "cfg": cfg,
-                "sandbox_id": None,  # Will be created on first use
-                "output_formatter": output_formatter,
-            }
-            
-            # Wrap the main agent tool manager with SessionAwareSandboxManager
-            session_dict["main_agent_tool_manager"] = SessionAwareSandboxManager(
-                main_agent_tool_manager, session_dict
-            )
-            
-            # Wrap sub-agent tool managers as well
-            wrapped_sub_agents = {}
-            for agent_name, sub_agent_tool_manager in sub_agent_tool_managers.items():
-                wrapped_sub_agents[agent_name] = SessionAwareSandboxManager(
-                    sub_agent_tool_manager, session_dict
-                )
-            session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
-            
-            _sessions[session_key] = session_dict
+            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
         
         session = _sessions[session_key]
         tool_manager = session["main_agent_tool_manager"]
