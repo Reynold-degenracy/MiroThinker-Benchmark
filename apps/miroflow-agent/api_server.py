@@ -237,6 +237,15 @@ def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
         create_pipeline_components(cfg)
     )
     
+    # Automatically blacklist create_sandbox tool since SessionAwareSandboxManager
+    # handles sandbox creation automatically. This prevents the LLM from directly
+    # calling create_sandbox and overwriting the session's sandbox.
+    main_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
+    logger.info("Auto-blacklisted 'create_sandbox' tool - sandbox management is automatic")
+    
+    for sub_agent_tool_manager in sub_agent_tool_managers.values():
+        sub_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
+    
     # Create session dict
     session_dict = {
         "cfg": cfg,

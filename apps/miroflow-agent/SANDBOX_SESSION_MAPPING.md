@@ -64,6 +64,15 @@ The implementation uses **lazy verification** for performance:
 - On failure, sandbox is automatically recreated and the call is retried once
 - This avoids unnecessary verification overhead while maintaining fault tolerance
 
+### Automatic Tool Blacklisting
+
+To prevent the LLM from interfering with automatic sandbox management:
+- **`create_sandbox` is automatically blacklisted** when SessionAwareSandboxManager is used
+- The LLM cannot see or call `create_sandbox` directly
+- This prevents the LLM from creating new sandboxes and overwriting the session's existing sandbox
+- SessionAwareSandboxManager still calls `create_sandbox` internally when needed
+- The blacklisting happens automatically in `_create_session_with_wrapped_managers()`
+
 ### Tools with Auto-Injection
 
 The following Python tools automatically receive `sandbox_id`:
