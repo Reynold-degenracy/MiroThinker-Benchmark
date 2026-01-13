@@ -30,6 +30,269 @@ _default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
 _sessions: Dict[str, Dict] = {}
 
 
+class SessionAwareSandboxManager:
+    """
+    Wrapper for ToolManager that automatically manages sandbox creation and reuse per session.
+    
+    This ensures that all Python tool calls within the same session use the same sandbox,
+    without requiring the agent to explicitly pass sandbox_id or manage sandbox lifecycle.
+    """
+    
+    def __init__(self, tool_manager, session_dict: Dict):
+        """
+        Initialize the SessionAwareSandboxManager.
+        
+        Args:
+            tool_manager: The underlying ToolManager instance
+            session_dict: Reference to the session dictionary where sandbox_id is stored
+        """
+        self.tool_manager = tool_manager
+        self.session_dict = session_dict
+        self._sandbox_creation_lock = asyncio.Lock()
+    
+    async def _ensure_sandbox_exists(self) -> str:
+        """
+        Ensure a sandbox exists for this session, creating one if necessary.
+        
+        Returns:
+            The sandbox_id for this session
+        """
+        async with self._sandbox_creation_lock:
+            sandbox_id = self.session_dict.get("sandbox_id")
+            
+            # If sandbox_id exists, trust it and return directly
+            # If it's actually expired/unavailable, the tool call will fail
+            # and we'll handle that in execute_tool_call
+            if sandbox_id:
+                logger.info(f"Reusing existing sandbox {sandbox_id}")
+                return sandbox_id
+            
+            # Create a new sandbox
+            logger.info("Creating new sandbox for session")
+            result = await self.tool_manager.execute_tool_call(
+                server_name="tool-python",
+                tool_name="create_sandbox",
+                arguments={"timeout": 3600}  # 1 hour TTL
+            )
+            
+            if "result" in result and "sandbox_id:" in result["result"]:
+                sandbox_id = result["result"].split("sandbox_id:")[-1].strip()
+                self.session_dict["sandbox_id"] = sandbox_id
+                logger.info(f"Created new sandbox {sandbox_id} for session")
+                return sandbox_id
+            else:
+                # Check for error field for more robust error detection
+                error_msg = result.get("error", str(result))
+                raise Exception(f"Failed to create sandbox: {error_msg}")
+    
+    def _needs_sandbox_id(self, tool_name: str, arguments: dict) -> bool:
+        """
+        Check if a tool call needs a sandbox_id parameter.
+        
+        Args:
+            tool_name: The name of the tool being called
+            arguments: The arguments for the tool call
+            
+        Returns:
+            True if this tool needs sandbox_id and doesn't have a valid one
+        """
+        # Tools that require sandbox_id
+        sandbox_tools = {
+            "run_command",
+            "run_python_code", 
+            "run_python_code_stream",
+            "upload_file_from_local_to_sandbox",
+            "download_file_from_sandbox_to_local",
+            "download_file_from_internet_to_sandbox"
+        }
+        
+        if tool_name not in sandbox_tools:
+            return False
+        
+        # Check if sandbox_id is missing or invalid
+        sandbox_id = arguments.get("sandbox_id")
+        if not sandbox_id:
+            return True
+        
+        # Invalid sandbox IDs that should be replaced (from python_mcp_server.py)
+        INVALID_SANDBOX_IDS = {
+            "default", "sandbox1", "sandbox", "some_id", "new_sandbox",
+            "python", "create_sandbox", "sandbox123", "temp",
+            "sandbox-0", "sandbox-1", "sandbox_0", "sandbox_1",
+            "new", "0", "auto", "default_sandbox", "none",
+            "sandbox_12345", "dummy", "sandbox_01",
+        }
+        
+        # If the provided sandbox_id is invalid, we need to inject the real one
+        if sandbox_id in INVALID_SANDBOX_IDS:
+            logger.warning(f"Invalid sandbox_id '{sandbox_id}' detected, will replace with session sandbox")
+            return True
+        
+        return False
+    
+    async def execute_tool_call(self, server_name: str, tool_name: str, arguments: dict):
+        """
+        Execute a tool call, automatically injecting sandbox_id for Python tools.
+        
+        Args:
+            server_name: The name of the MCP server
+            tool_name: The name of the tool to call
+            arguments: The arguments for the tool
+            
+        Returns:
+            The result of the tool call
+        """
+        # If this is a Python tool that needs a sandbox_id, inject it
+        if server_name == "tool-python" and self._needs_sandbox_id(tool_name, arguments):
+            try:
+                sandbox_id = await self._ensure_sandbox_exists()
+                # Inject sandbox_id into arguments
+                arguments = {**arguments, "sandbox_id": sandbox_id}
+                logger.info(f"Auto-injected sandbox_id {sandbox_id} for tool {tool_name}")
+            except Exception as e:
+                logger.error(f"Failed to ensure sandbox exists: {e}", exc_info=True)
+                # Let the tool call proceed without sandbox_id, it will fail with appropriate error
+        
+        # Delegate to the underlying tool manager
+        result = await self.tool_manager.execute_tool_call(
+            server_name=server_name,
+            tool_name=tool_name,
+            arguments=arguments
+        )
+        
+        # If sandbox-related tool call failed due to sandbox unavailability, recreate and retry once
+        if (
+            server_name == "tool-python"
+            and self._needs_sandbox_id(tool_name, arguments)
+            and self._is_sandbox_error(result)
+        ):
+            # Capture the sandbox_id before acquiring the lock to detect concurrent updates
+            sandbox_id = self.session_dict.get("sandbox_id")
+            
+            # Protect sandbox reset/creation with the sandbox creation lock to avoid races
+            async with self._sandbox_creation_lock:
+                current_sandbox_id = self.session_dict.get("sandbox_id")
+                
+                # Check if another task has already refreshed the sandbox
+                if current_sandbox_id and current_sandbox_id != sandbox_id:
+                    logger.info(
+                        f"Sandbox error detected, but sandbox_id was already updated "
+                        f"to {current_sandbox_id}; skipping sandbox recreation in this call."
+                    )
+                    return result
+                
+                if sandbox_id:
+                    logger.warning(f"Sandbox {sandbox_id} is unavailable, recreating and retrying...")
+                else:
+                    logger.warning(
+                        "Sandbox is unavailable or was not initialized, creating new sandbox and retrying..."
+                    )
+                
+                # Clear the cached sandbox_id so a fresh one is created
+                self.session_dict["sandbox_id"] = None
+                
+                # Retry with new sandbox
+                try:
+                    new_sandbox_id = await self._ensure_sandbox_exists()
+                    arguments = {**arguments, "sandbox_id": new_sandbox_id}
+                    logger.info(f"Retrying with new sandbox {new_sandbox_id}")
+                    result = await self.tool_manager.execute_tool_call(
+                        server_name=server_name,
+                        tool_name=tool_name,
+                        arguments=arguments
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to recreate sandbox and retry: {e}", exc_info=True)
+        
+        return result
+    
+    def _is_sandbox_error(self, result: dict) -> bool:
+        """
+        Check if a tool call result indicates a sandbox connectivity error.
+        
+        Args:
+            result: The result from a tool call
+            
+        Returns:
+            True if this is a sandbox unavailability error
+        """
+        # Check for error field
+        if "error" in result:
+            error_msg = str(result["error"]).lower()
+            return any(phrase in error_msg for phrase in [
+                "failed to connect to sandbox",
+                "sandbox does not exist",
+                "sandbox not found",
+                "connection refused"
+            ])
+        
+        # Check for [ERROR] in result field (format used by Python MCP server)
+        if "result" in result:
+            result_str = str(result["result"])
+            if "[ERROR]" in result_str:
+                result_lower = result_str.lower()
+                return any(phrase in result_lower for phrase in [
+                    "failed to connect to sandbox",
+                    "sandbox does not exist",
+                    "sandbox not found"
+                ])
+        
+        return False
+    
+    def __getattr__(self, name):
+        """
+        Delegate all other attribute access to the underlying tool_manager.
+        """
+        return getattr(self.tool_manager, name)
+
+
+def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
+    """
+    Create a new session with tool managers wrapped in SessionAwareSandboxManager.
+    
+    Args:
+        cfg: Hydra configuration for the session
+        
+    Returns:
+        Session dictionary with wrapped tool managers
+    """
+    main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
+        create_pipeline_components(cfg)
+    )
+    
+    # Automatically blacklist create_sandbox tool since SessionAwareSandboxManager
+    # handles sandbox creation automatically. This prevents the LLM from directly
+    # calling create_sandbox and overwriting the session's sandbox.
+    main_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
+    logger.info("Auto-blacklisted 'create_sandbox' tool - sandbox management is automatic")
+    
+    for sub_agent_tool_manager in sub_agent_tool_managers.values():
+        sub_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
+    
+    # Create session dict
+    session_dict = {
+        "cfg": cfg,
+        "sandbox_id": None,  # Will be created on first use
+        "output_formatter": output_formatter,
+    }
+    
+    # Wrap the main agent tool manager with SessionAwareSandboxManager
+    # This automatically manages sandbox creation and reuse
+    session_dict["main_agent_tool_manager"] = SessionAwareSandboxManager(
+        main_agent_tool_manager, session_dict
+    )
+    
+    # Wrap sub-agent tool managers as well
+    wrapped_sub_agents = {}
+    for agent_name, sub_agent_tool_manager in sub_agent_tool_managers.items():
+        wrapped_sub_agents[agent_name] = SessionAwareSandboxManager(
+            sub_agent_tool_manager, session_dict
+        )
+    session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
+    
+    return session_dict
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
@@ -138,15 +401,7 @@ async def stream_generator(
     
     if session_key not in _sessions:
         cfg = initialize_config(overrides=override_list)
-        main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
-            create_pipeline_components(cfg)
-        )
-        _sessions[session_key] = {
-            "main_agent_tool_manager": main_agent_tool_manager,
-            "sub_agent_tool_managers": sub_agent_tool_managers,
-            "output_formatter": output_formatter,
-            "cfg": cfg,
-        }
+        _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
     
     session = _sessions[session_key]
     cfg = session["cfg"]
@@ -396,45 +651,25 @@ async def upload_file(
         if session_key not in _sessions:
             # Initialize session with default config
             cfg = initialize_config()
-            main_agent_tool_manager, sub_agent_tool_managers, output_formatter = (
-                create_pipeline_components(cfg)
-            )
-            _sessions[session_key] = {
-                "main_agent_tool_manager": main_agent_tool_manager,
-                "sub_agent_tool_managers": sub_agent_tool_managers,
-                "output_formatter": output_formatter,
-                "cfg": cfg,
-                "sandbox_id": None,  # Will be created on first use
-            }
+            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
         
         session = _sessions[session_key]
         tool_manager = session["main_agent_tool_manager"]
         
-        async def create_sandbox(tool_mgr):
-            """Create a new sandbox and persist sandbox_id in the session."""
-            logger.info(f"Creating new sandbox for session {x_session_id}")
-            result = await tool_mgr.execute_tool_call(
-                server_name="tool-python",
-                tool_name="create_sandbox",
-                arguments={"timeout": 3600}  # 1 hour TTL
-            )
-            if "result" in result and "sandbox_id:" in result["result"]:
-                created_id = result["result"].split("sandbox_id:")[-1].strip()
-                session["sandbox_id"] = created_id
-                logger.info(f"Created sandbox {created_id} for session {x_session_id}")
-                return created_id
-            raise Exception(f"Failed to create sandbox: {result}")
+        # The SessionAwareSandboxManager will automatically create and inject sandbox_id
+        # So we can directly call the upload tool without managing sandbox_id manually
         
-        async def upload_to_sandbox(target_sandbox_id: str, local_path: str):
+        async def upload_to_sandbox(local_path: str):
+            """Upload file to the session's sandbox (sandbox_id auto-injected)."""
             sandbox_file_path = f"/home/user/{safe_filename}"
-            logger.info(
-                f"Uploading {local_path} to sandbox {target_sandbox_id} at {sandbox_file_path}"
-            )
+            logger.info(f"Uploading {local_path} to session sandbox at {sandbox_file_path}")
+            
+            # Note: sandbox_id will be automatically injected by SessionAwareSandboxManager
             upload_result = await tool_manager.execute_tool_call(
                 server_name="tool-python",
                 tool_name="upload_file_from_local_to_sandbox",
                 arguments={
-                    "sandbox_id": target_sandbox_id,
+                    # sandbox_id is auto-injected, no need to pass it explicitly
                     "local_file_path": local_path,
                     "sandbox_file_path": "/home/user"
                 }
@@ -450,11 +685,12 @@ async def upload_file(
                 uploaded_temp_name = os.path.basename(local_path)
                 if uploaded_temp_name != safe_filename:
                     logger.info(f"Renaming uploaded file from {uploaded_temp_name} to {safe_filename}")
+                    # Note: sandbox_id is auto-injected by SessionAwareSandboxManager
                     rename_result = await tool_manager.execute_tool_call(
                         server_name="tool-python",
                         tool_name="run_command",
                         arguments={
-                            "sandbox_id": target_sandbox_id,
+                            # sandbox_id is auto-injected
                             "command": f"mv /home/user/{uploaded_temp_name} /home/user/{safe_filename}"
                         }
                     )
@@ -468,15 +704,6 @@ async def upload_file(
                 return sandbox_file_path
             raise Exception(f"Upload failed: {upload_result}")
         
-        # Get or create sandbox for this session
-        sandbox_id = session.get("sandbox_id")
-        if not sandbox_id:
-            try:
-                sandbox_id = await create_sandbox(tool_manager)
-            except Exception as e:
-                logger.error(f"Error creating sandbox: {e}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"Failed to create sandbox: {str(e)}")
-        
         # Save file to temporary location first
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp_file:
             content = await file.read()
@@ -484,23 +711,8 @@ async def upload_file(
             tmp_file_path = tmp_file.name
         
         try:
-            try:
-                sandbox_file_path = await upload_to_sandbox(sandbox_id, tmp_file_path)
-            except Exception as e:
-                error_msg = str(e)
-                if sandbox_id and (
-                    "Failed to connect to sandbox" in error_msg
-                    or "sandbox does not exist" in error_msg
-                    or "Sandbox not found" in error_msg
-                ):
-                    logger.warning(
-                        f"Sandbox {sandbox_id} unavailable for session {x_session_id}; creating a new sandbox and retrying"
-                    )
-                    session["sandbox_id"] = None
-                    sandbox_id = await create_sandbox(tool_manager)
-                    sandbox_file_path = await upload_to_sandbox(sandbox_id, tmp_file_path)
-                else:
-                    raise
+            # SessionAwareSandboxManager handles sandbox creation and retry logic
+            sandbox_file_path = await upload_to_sandbox(tmp_file_path)
             
             return {
                 "data": {

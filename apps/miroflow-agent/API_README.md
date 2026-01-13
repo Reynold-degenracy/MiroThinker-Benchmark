@@ -198,10 +198,13 @@ with open("/path/to/example.txt", "rb") as f:
 
 ### Sandbox Notes
 
-- Each `X-Session-Id` corresponds to a sandbox
-- Sandbox lifecycle is 3600 seconds (default TTL), after which a new sandbox is automatically created
-- The server is stateless and does not maintain conversation history
-- Clients should maintain their own history and pass it in requests via the `history` parameter
+- **Each `X-Session-Id` corresponds to a persistent sandbox**: Sandboxes are automatically created and reused across multiple requests with the same session ID
+- **Automatic sandbox management**: Python tools (like `run_command`, `run_python_code`) automatically use the session's sandbox without requiring explicit `sandbox_id` parameters
+- **Sandbox lifecycle**: 3600 seconds (1 hour) default TTL. If a sandbox expires or becomes unavailable, a new one is automatically created on the next Python tool call
+- **Session isolation**: Each session has its own sandbox, ensuring isolation between different users or conversation threads
+- **No manual management needed**: The `SessionAwareSandboxManager` handles all sandbox creation, reuse, and cleanup automatically
+
+For technical details about the sandbox-to-session mapping implementation, see [SANDBOX_SESSION_MAPPING.md](./SANDBOX_SESSION_MAPPING.md).
 
 ## Health Check
 
