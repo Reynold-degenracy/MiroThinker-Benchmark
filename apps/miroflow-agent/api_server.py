@@ -94,7 +94,7 @@ class SessionAwareSandboxManager:
             arguments: The arguments for the tool call
             
         Returns:
-            True if this tool needs sandbox_id and it's not already provided
+            True if this tool needs sandbox_id and doesn't have a valid one
         """
         # Tools that require sandbox_id
         sandbox_tools = {
@@ -106,8 +106,29 @@ class SessionAwareSandboxManager:
             "download_file_from_internet_to_sandbox"
         }
         
-        # Check if this tool needs sandbox_id and doesn't already have it
-        return tool_name in sandbox_tools and "sandbox_id" not in arguments
+        if tool_name not in sandbox_tools:
+            return False
+        
+        # Check if sandbox_id is missing or invalid
+        sandbox_id = arguments.get("sandbox_id")
+        if not sandbox_id:
+            return True
+        
+        # Invalid sandbox IDs that should be replaced (from python_mcp_server.py)
+        INVALID_SANDBOX_IDS = {
+            "default", "sandbox1", "sandbox", "some_id", "new_sandbox",
+            "python", "create_sandbox", "sandbox123", "temp",
+            "sandbox-0", "sandbox-1", "sandbox_0", "sandbox_1",
+            "new", "0", "auto", "default_sandbox", "none",
+            "sandbox_12345", "dummy", "sandbox_01",
+        }
+        
+        # If the provided sandbox_id is invalid, we need to inject the real one
+        if sandbox_id in INVALID_SANDBOX_IDS:
+            logger.warning(f"Invalid sandbox_id '{sandbox_id}' detected, will replace with session sandbox")
+            return True
+        
+        return False
     
     async def execute_tool_call(self, server_name: str, tool_name: str, arguments: dict):
         """
@@ -145,9 +166,11 @@ class SessionAwareSandboxManager:
             and self._needs_sandbox_id(tool_name, arguments)
             and self._is_sandbox_error(result)
         ):
+            # Capture the sandbox_id before acquiring the lock to detect concurrent updates
+            sandbox_id = self.session_dict.get("sandbox_id")
+            
             # Protect sandbox reset/creation with the sandbox creation lock to avoid races
             async with self._sandbox_creation_lock:
-                sandbox_id = self.session_dict.get("sandbox_id")
                 current_sandbox_id = self.session_dict.get("sandbox_id")
                 
                 # Check if another task has already refreshed the sandbox

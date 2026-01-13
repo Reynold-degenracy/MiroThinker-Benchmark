@@ -73,6 +73,15 @@ To prevent the LLM from interfering with automatic sandbox management:
 - SessionAwareSandboxManager still calls `create_sandbox` internally when needed
 - The blacklisting happens automatically in `_create_session_with_wrapped_managers()`
 
+### Invalid Sandbox ID Detection
+
+The implementation detects and replaces invalid sandbox IDs:
+- **Invalid placeholder IDs are automatically replaced** with the real session sandbox ID
+- Common invalid IDs include: "sandbox", "default", "sandbox1", "temp", etc.
+- If the LLM provides an invalid sandbox_id parameter, it's replaced with the session's actual sandbox_id
+- This prevents errors like `'sandbox' is not a valid sandbox_id`
+- Ensures the LLM always uses the correct sandbox even when providing placeholder values
+
 ### Tools with Auto-Injection
 
 The following Python tools automatically receive `sandbox_id`:
