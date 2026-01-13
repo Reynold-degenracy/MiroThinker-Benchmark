@@ -142,6 +142,7 @@ The tests verify:
 ## Notes
 
 - Sandbox TTL is set to 3600 seconds (1 hour) by default
-- Sandbox verification is performed before reuse to handle expiry
+- **Lazy verification**: Sandbox is trusted until a tool call fails (no unnecessary verification calls)
+- **Automatic retry**: Failed sandbox calls trigger recreation and single retry
 - Thread-safe sandbox creation using asyncio locks
 - All attributes of the underlying ToolManager are accessible via delegation
