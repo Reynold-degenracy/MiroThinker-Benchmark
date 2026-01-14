@@ -1,6 +1,6 @@
 # conf/llm/default.yaml - Default LLM configuration
 provider: "openai" # openai, anthropic, qwen - OpenRouter uses OpenAI-compatible API
-model_name: "google/gemini-2.5-flash"
+model_name: "openai/gpt-5-mini"
 async_client: false
 temperature: 0.3
 top_p: 1.0

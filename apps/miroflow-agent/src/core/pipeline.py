@@ -33,6 +33,7 @@ async def execute_task_pipeline(
     ground_truth: Optional[Any] = None,
     log_dir: str = "logs",
     stream_queue: Optional[Any] = None,
+    initial_message_history: Optional[List[Dict[str, str]]] = None,
     tool_definitions: Optional[List[Dict[str, Any]]] = None,
     sub_agent_tool_definitions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ):
@@ -102,6 +103,7 @@ async def execute_task_pipeline(
             task_description=task_description,
             task_file_name=task_file_name,
             task_id=task_id,
+            initial_message_history=initial_message_history,
         )
 
         llm_client.close()

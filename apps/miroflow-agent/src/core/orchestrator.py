@@ -836,7 +836,11 @@ class Orchestrator:
         return final_answer_text
 
     async def run_main_agent(
-        self, task_description, task_file_name=None, task_id="default_task"
+        self,
+        task_description,
+        task_file_name=None,
+        task_id="default_task",
+        initial_message_history: Optional[List[Dict[str, str]]] = None,
     ):
         """Execute the main end-to-end task"""
         workflow_id = await self._stream_start_workflow(task_description)
@@ -854,7 +858,16 @@ class Orchestrator:
         initial_user_content, processed_task_desc = process_input(
             task_description, task_file_name
         )
-        message_history = [{"role": "user", "content": initial_user_content}]
+
+        # Initialize message history. If the caller provided an initial_message_history
+        # (from previous requests), reuse it and append the current user input so the
+        # LLM has full context. Otherwise start a fresh history with the current user input.
+        if initial_message_history:
+            # Copy to avoid mutating caller's list
+            message_history = list(initial_message_history)
+            message_history.append({"role": "user", "content": initial_user_content})
+        else:
+            message_history = [{"role": "user", "content": initial_user_content}]
 
         # Record initial user input
         user_input = processed_task_desc

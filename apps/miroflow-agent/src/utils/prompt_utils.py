@@ -82,6 +82,15 @@ You accomplish a given task iteratively, breaking it down into clear steps and w
 
 """
 
+    # Safety / sandbox reuse instruction
+    template += """
+Important Sandbox Note:
+- Do NOT attempt to create or manage sandboxes yourself (for example, do not call the `create_sandbox` tool).
+- The system will automatically create and inject a `sandbox_id` when needed. Always rely on the injected `sandbox_id` and invoke sandbox-related tools (e.g. `run_command`, `run_python_code`, `upload_file_from_local_to_sandbox`) using the provided tool format.
+- If you need to operate on files or run code in the sandbox, call the appropriate tool and do NOT describe or attempt to perform sandbox lifecycle actions.
+
+"""
+
     return template
 
 
