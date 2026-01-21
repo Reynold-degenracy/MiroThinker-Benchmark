@@ -2,14 +2,11 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
-import hashlib
 import json
-import logging
 import os
 import sys
 import tempfile
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Dict, List, Optional
 
 # Add parent directory to path to import from src
@@ -353,7 +350,15 @@ def initialize_config(overrides: Optional[List[str]] = None):
             merged_cfg = OmegaConf.create(_default_cfg)
             for override in overrides:
                 # Parse override string (e.g., "llm.temperature=0.7")
+                if "=" not in override:
+                    raise ValueError(
+                        f"Invalid override format '{override}'. Expected 'key=value'."
+                    )
                 key, value = override.split("=", 1)
+                if not key:
+                    raise ValueError(
+                        f"Invalid override format '{override}': key cannot be empty."
+                    )
                 OmegaConf.update(merged_cfg, key, value, merge=True)
             return merged_cfg
         return _default_cfg
@@ -399,7 +404,9 @@ async def stream_generator(
     session_key = session_id
     
     if session_key not in _sessions:
-        cfg = initialize_config()
+        # For planning mode, override max_turns to 1 to only generate plan
+        overrides = ["agent.main_agent.max_turns=1"] if is_planning else None
+        cfg = initialize_config(overrides=overrides)
         _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
     
     session = _sessions[session_key]
@@ -409,6 +416,15 @@ async def stream_generator(
     task_id = f"api_{session_id}"
     task_description = query
     task_file_name = ""
+    
+    # Convert history to message history format if provided
+    initial_message_history = None
+    if history:
+        initial_message_history = [
+            {"role": "user" if msg.type == "query" else "assistant", "content": msg.content or ""}
+            for msg in history
+            if msg.content
+        ]
     
     # Track current step
     current_step = 0
@@ -592,6 +608,7 @@ async def stream_generator(
                 output_formatter=session["output_formatter"],
                 log_dir=cfg.debug_dir,
                 stream_queue=stream_queue,
+                initial_message_history=initial_message_history,
             )
         except Exception as e:
             logger.error(f"Error in pipeline execution: {e}", exc_info=True)
@@ -611,7 +628,6 @@ async def stream_generator(
 async def plan(
     request: PlanRequest,
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: Optional[str] = Header(None),
 ):
     """
     Submit a question and get step-by-step planning.
@@ -619,7 +635,6 @@ async def plan(
     Args:
         request: Request body containing query and history
         x_session_id: Session ID from header
-        authorization: Bearer token (optional)
     
     Returns:
         StreamingResponse with messages in format:
@@ -649,7 +664,6 @@ async def plan(
 async def execute(
     request: ExecuteRequest,
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: Optional[str] = Header(None),
 ):
     """
     Execute a plan and get results.
@@ -657,7 +671,6 @@ async def execute(
     Args:
         request: Request body containing plan
         x_session_id: Session ID from header
-        authorization: Bearer token (optional)
     
     Returns:
         StreamingResponse with messages in format:
@@ -668,9 +681,16 @@ async def execute(
     try:
         logger.info(f"Received execute request for session {x_session_id} with {len(request.plan)} plan steps")
         
-        # Convert plan to query string
-        plan_text = "\n".join([f"Step {msg.step}: {msg.content}" for msg in request.plan if msg.content])
-        query = f"Execute the following plan:\n{plan_text}"
+        # Convert plan to a structured JSON representation to preserve all plan data
+        plan_payload = [
+            {
+                "step": msg.step,
+                "content": msg.content,
+            }
+            for msg in request.plan
+            if msg.content is not None
+        ]
+        query = f"Execute the following structured plan:\n{json.dumps(plan_payload, ensure_ascii=False)}"
         
         return StreamingResponse(
             stream_generator(
@@ -697,7 +717,6 @@ async def health_check():
 async def upload_file(
     file: UploadFile = File(...),
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: Optional[str] = Header(None),
 ):
     """
     Upload a file to the workspace.
@@ -705,7 +724,6 @@ async def upload_file(
     Args:
         file: The file to upload (from multipart/form-data)
         x_session_id: Session ID from header
-        authorization: Bearer token (optional)
     
     Returns:
         JSON response with the file path in the sandbox
@@ -718,7 +736,11 @@ async def upload_file(
         # Sanitize filename to prevent path traversal attacks
         safe_filename = os.path.basename(file.filename)
         
-        # Additional validation
+        # Ensure sanitized filename is not empty
+        if not safe_filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        # Additional validation for path traversal characters
         if ".." in safe_filename or "/" in safe_filename or "\\" in safe_filename:
             raise HTTPException(
                 status_code=400, 
@@ -764,11 +786,13 @@ async def upload_file(
                 uploaded_temp_name = os.path.basename(local_path)
                 if uploaded_temp_name != safe_filename:
                     logger.info(f"Renaming uploaded file from {uploaded_temp_name} to {safe_filename}")
+                    # Use Python code instead of shell command for safer file operations
+                    rename_code = f"import os; os.rename('/home/user/{uploaded_temp_name}', '/home/user/{safe_filename}')"
                     rename_result = await tool_manager.execute_tool_call(
                         server_name="tool-python",
-                        tool_name="run_command",
+                        tool_name="run_python_code",
                         arguments={
-                            "command": f"mv /home/user/{uploaded_temp_name} /home/user/{safe_filename}"
+                            "code": rename_code
                         }
                     )
                     if "result" in rename_result:

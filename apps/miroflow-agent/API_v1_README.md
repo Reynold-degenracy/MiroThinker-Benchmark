@@ -157,7 +157,7 @@ Authorization: Bearer xxx
 ```bash
 curl http://localhost:8000/v1/api/upload \
   -H "X-Session-Id: sess_001" \
-  -F "file=@/path/to/example.txt"  # 服务端文件地址
+  -F "file=@/path/to/example.txt"  # 客户端本地文件路径
 
 # HTTP 200 OK
 ```
@@ -166,7 +166,7 @@ curl http://localhost:8000/v1/api/upload \
 
 | 参数名 | 类型 | 必填 | 描述 |
 |--------|------|------|------|
-| file | file | 是 | 服务端文件地址 |
+| file | file | 是 | 要上传的文件（客户端本地文件） |
 
 #### 返回示例
 
@@ -187,6 +187,7 @@ curl http://localhost:8000/v1/api/upload \
 
 - 服务端无状态，不保存对话历史。
 - 客户端需自行维护历史，并在请求中通过 history 传入。
+- history 参数将被传递给底层 pipeline，用于保持对话上下文。
 
 ## 示例
 
