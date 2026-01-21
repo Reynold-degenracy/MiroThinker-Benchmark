@@ -1,4 +1,6 @@
-# MiroFlow Agent API
+# MiroFlow Agent API (Legacy)
+
+> **Note**: This is the legacy API documentation. For the new API v1 with updated endpoints and message format, see [API_v1_README.md](./API_v1_README.md).
 
 This API provides a streaming endpoint for the MiroFlow Agent to process queries and return responses in real-time.
 
