@@ -4,7 +4,11 @@
 
 ## 启动
 
+**重要：** 服务器必须从仓库根目录启动。
+
 ```bash
+# 从仓库根目录运行
+cd /path/to/MiroThinker-Benchmark
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
