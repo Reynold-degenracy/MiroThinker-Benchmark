@@ -9,15 +9,16 @@ import sys
 
 
 def test_api_structure():
-    """Test that the API server has the correct structure"""
-    print("Testing API server structure...")
+    """Test that the new API server has the correct structure"""
+    print("Testing new API server structure...")
     
     # Check if basic FastAPI components are correct
     checks = {
         "FastAPI app defined": False,
-        "QueryRequest model defined": False,
-        "POST /get_response endpoint defined": False,
-        "POST /upload_file endpoint defined": False,
+        "Message model defined": False,
+        "POST /v1/api/plan endpoint defined": False,
+        "POST /v1/api/execute endpoint defined": False,
+        "POST /v1/api/upload endpoint defined": False,
         "Health check endpoint defined": False,
         "NDJSON streaming used": False,
         "Session management implemented": False,
@@ -25,24 +26,28 @@ def test_api_structure():
     }
     
     try:
-        with open("api_server.py", "r") as f:
+        with open("api/main.py", "r") as f:
             content = f.read()
             
         # Check for FastAPI app
         if "app = FastAPI" in content:
             checks["FastAPI app defined"] = True
             
-        # Check for QueryRequest model
-        if "class QueryRequest(BaseModel)" in content and "query: str" in content:
-            checks["QueryRequest model defined"] = True
+        # Check for Message model
+        if "class Message(BaseModel)" in content and "type: str" in content:
+            checks["Message model defined"] = True
             
-        # Check for POST endpoint
-        if '@app.post("/get_response")' in content:
-            checks["POST /get_response endpoint defined"] = True
+        # Check for POST /v1/api/plan endpoint
+        if '@app.post("/v1/api/plan")' in content:
+            checks["POST /v1/api/plan endpoint defined"] = True
+            
+        # Check for POST /v1/api/execute endpoint
+        if '@app.post("/v1/api/execute")' in content:
+            checks["POST /v1/api/execute endpoint defined"] = True
             
         # Check for upload endpoint
-        if '@app.post("/upload_file")' in content:
-            checks["POST /upload_file endpoint defined"] = True
+        if '@app.post("/v1/api/upload")' in content:
+            checks["POST /v1/api/upload endpoint defined"] = True
             
         # Check for health endpoint
         if '@app.get("/health")' in content:
@@ -85,14 +90,16 @@ def test_api_structure():
 
 def test_response_format():
     """Verify response format examples"""
-    print("\n\nTesting response format examples...")
+    print("\n\nTesting new response format examples...")
     
-    # Example responses that should be generated
+    # Example responses that should be generated (new format)
     examples = [
-        {"status": "plan", "step": 1, "data": "Workflow started"},
-        {"status": "plan", "step": 2, "data": "Using tool: search"},
-        {"status": "answer", "data": "I am"},
-        {"status": "answer", "data": " Manus"},
+        {"type": "start", "step": 1, "delta": ""},
+        {"type": "plan", "step": 1, "delta": "Workflow started"},
+        {"type": "plan", "step": 2, "delta": "Using tool: search"},
+        {"type": "end", "step": 2, "delta": ""},
+        {"type": "answer", "step": 1, "delta": "I am"},
+        {"type": "answer", "step": 1, "delta": " Manus"},
     ]
     
     print("\nExpected response format (NDJSON):")
@@ -104,10 +111,10 @@ def test_response_format():
             print(json_str)
             # Verify it can be parsed back
             parsed = json.loads(json_str)
-            assert "status" in parsed
-            assert parsed["status"] in ["plan", "answer"]
-            if parsed["status"] == "plan":
-                assert "step" in parsed
+            assert "type" in parsed
+            assert parsed["type"] in ["start", "plan", "answer", "action", "end", "query"]
+            assert "step" in parsed
+            assert "delta" in parsed
         except Exception as e:
             print(f"✗ Invalid format: {e}")
             return False
