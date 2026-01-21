@@ -337,14 +337,16 @@ def initialize_config(overrides: Optional[List[str]] = None):
     # Otherwise, initialize with default config
     if _cfg is None:
         # Initialize Hydra with default config (only once at startup)
-        # Hydra requires a relative path from the current working directory
-        # The server should be started from the repository root
-        with hydra.initialize(config_path="apps/miroflow-agent/conf", version_base=None):
+        # Use initialize_config_dir with absolute path to avoid path resolution issues
+        # miroflow_agent_path is calculated as Path(__file__).parent.parent / "apps" / "miroflow-agent"
+        config_dir = str((miroflow_agent_path / "conf").absolute())
+        with hydra.initialize_config_dir(config_dir=config_dir, version_base=None):
             _cfg = hydra.compose(config_name="config")
     
     # If overrides are provided, create a new config with those overrides
     if overrides:
-        with hydra.initialize(config_path="apps/miroflow-agent/conf", version_base=None):
+        config_dir = str((miroflow_agent_path / "conf").absolute())
+        with hydra.initialize_config_dir(config_dir=config_dir, version_base=None):
             return hydra.compose(config_name="config", overrides=overrides)
     
     return _cfg
