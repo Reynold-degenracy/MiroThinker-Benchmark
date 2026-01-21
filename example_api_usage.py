@@ -69,8 +69,11 @@ def test_plan_endpoint(base_url="http://localhost:8000", session_id="test_sessio
         for line in response.iter_lines():
             if line:
                 line_count += 1
-                event = json.loads(line)
-                print(f"  {json.dumps(event)}")
+                try:
+                    event = json.loads(line)
+                    print(f"  {json.dumps(event)}")
+                except json.JSONDecodeError as e:
+                    print(f"  ⚠️  Invalid JSON: {line.decode('utf-8', errors='ignore')}")
                 if line_count >= 10:  # Limit output for demo
                     print("  ... (truncated)")
                     break
@@ -119,8 +122,11 @@ def test_execute_endpoint(base_url="http://localhost:8000"):
         for line in response.iter_lines():
             if line:
                 line_count += 1
-                event = json.loads(line)
-                print(f"  {json.dumps(event)}")
+                try:
+                    event = json.loads(line)
+                    print(f"  {json.dumps(event)}")
+                except json.JSONDecodeError as e:
+                    print(f"  ⚠️  Invalid JSON: {line.decode('utf-8', errors='ignore')}")
                 if line_count >= 10:  # Limit output for demo
                     print("  ... (truncated)")
                     break
