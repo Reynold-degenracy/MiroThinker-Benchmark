@@ -919,8 +919,19 @@ class Orchestrator:
         # For plan_only mode, we only want to collect tool calls without executing them
         collected_plan_steps = []
 
-        self.current_agent_id = await self._stream_start_agent("main")
-        await self._stream_start_llm("main")
+        # For execute_only mode, skip the planning loop and go directly to answer generation
+        if execution_mode == "execute_only":
+            self.task_log.log_step(
+                "info",
+                "Main Agent | Execute Only Mode",
+                "Skipping planning phase, going directly to answer generation"
+            )
+            # Set turn_count to max to skip the planning loop
+            turn_count = max_turns
+        else:
+            self.current_agent_id = await self._stream_start_agent("main")
+            await self._stream_start_llm("main")
+
         while turn_count < max_turns and total_attempts < max_attempts:
             turn_count += 1
             total_attempts += 1
@@ -1316,8 +1327,10 @@ class Orchestrator:
                 )
                 break
 
-        await self._stream_end_llm("main")
-        await self._stream_end_agent("main", self.current_agent_id)
+        # Only end streaming for modes that started them
+        if execution_mode != "execute_only":
+            await self._stream_end_llm("main")
+            await self._stream_end_agent("main", self.current_agent_id)
 
         # For plan_only mode, skip final summary and return the collected plan
         if execution_mode == "plan_only":

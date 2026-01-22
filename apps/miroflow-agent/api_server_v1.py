@@ -669,7 +669,7 @@ async def execute_stream_generator(
                 output_formatter=session["output_formatter"],
                 log_dir=cfg.debug_dir,
                 stream_queue=stream_queue,
-                execution_mode="full",
+                execution_mode="execute_only",
             )
         except Exception as e:
             logger.error(f"Error in pipeline execution: {e}", exc_info=True)
