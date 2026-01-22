@@ -2,11 +2,10 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
-import hashlib
 import json
-import logging
 import os
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
@@ -28,11 +27,16 @@ TOOL_INPUT_TRUNCATE_LENGTH = 200  # Max length for displaying tool inputs
 STREAMING_CHUNK_SIZE = 10  # Character chunk size for streaming effects
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB file upload limit
+SESSION_CLEANUP_INTERVAL = 3600  # Clean up sessions every hour
+SESSION_TTL = 7200  # Session TTL: 2 hours
 
 # Global configuration storage
 _cfg: Optional[DictConfig] = None
 _default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
 _sessions: Dict[str, Dict] = {}
+_session_lock = asyncio.Lock()  # Lock for session creation to prevent race conditions
+_background_tasks: set = set()  # Track background tasks
 
 
 class SessionAwareSandboxManager:
@@ -294,8 +298,27 @@ def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
             sub_agent_tool_manager, session_dict
         )
     session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
+    session_dict["created_at"] = time.time()  # Track session creation time
     
     return session_dict
+
+
+async def cleanup_old_sessions():
+    """Periodically clean up old sessions that exceed TTL"""
+    while True:
+        await asyncio.sleep(SESSION_CLEANUP_INTERVAL)
+        current_time = time.time()
+        to_delete = []
+        
+        async with _session_lock:
+            for session_id, session in _sessions.items():
+                created_at = session.get("created_at", 0)
+                if current_time - created_at > SESSION_TTL:
+                    to_delete.append(session_id)
+                    logger.info(f"Cleaning up expired session: {session_id}")
+            
+            for session_id in to_delete:
+                del _sessions[session_id]
 
 
 @asynccontextmanager
@@ -304,13 +327,27 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MiroFlow Agent API Server v1")
     initialize_config()
+    
+    # Start background session cleanup task
+    cleanup_task = asyncio.create_task(cleanup_old_sessions())
+    _background_tasks.add(cleanup_task)
+    cleanup_task.add_done_callback(_background_tasks.discard)
+    
     yield
+    
     # Shutdown
     logger.info("Shutting down MiroFlow Agent API Server v1")
-    # Clean up all sessions
-    for session_id, session in _sessions.items():
-        # Close tool managers if needed
-        pass
+    
+    # Cancel all background tasks
+    for task in _background_tasks:
+        task.cancel()
+    
+    # Wait for all tasks to complete
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+    
+    # Clear all sessions
+    _sessions.clear()
 
 
 app = FastAPI(title="MiroFlow Agent API v1", lifespan=lifespan)
@@ -393,11 +430,12 @@ async def plan_stream_generator(
     # Create async queue for receiving streaming updates
     stream_queue = asyncio.Queue()
     
-    # Get or create pipeline components for this session
+    # Get or create pipeline components for this session with race condition protection
     session_key = session_id
-    if session_key not in _sessions:
-        cfg = initialize_config()
-        _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
+    async with _session_lock:
+        if session_key not in _sessions:
+            cfg = initialize_config()
+            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
     
     session = _sessions[session_key]
     cfg = session["cfg"]
@@ -512,8 +550,10 @@ async def plan_stream_generator(
             # Signal end of stream
             await stream_queue.put(None)
     
-    # Start pipeline in background
-    asyncio.create_task(run_pipeline())
+    # Start pipeline in background and track it
+    task = asyncio.create_task(run_pipeline())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     
     # Yield transformed stream events
     async for output in consume_stream():
@@ -539,11 +579,12 @@ async def execute_stream_generator(
     # Create async queue for receiving streaming updates
     stream_queue = asyncio.Queue()
     
-    # Get or create pipeline components for this session
+    # Get or create pipeline components for this session with race condition protection
     session_key = session_id
-    if session_key not in _sessions:
-        cfg = initialize_config()
-        _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
+    async with _session_lock:
+        if session_key not in _sessions:
+            cfg = initialize_config()
+            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
     
     session = _sessions[session_key]
     cfg = session["cfg"]
@@ -598,8 +639,6 @@ async def execute_stream_generator(
                 
                 elif event_type == "tool_call":
                     # Tool calls during execution might indicate new steps
-                    tool_name = data.get("tool_name", "")
-                    
                     # Close previous step if open
                     if in_step:
                         end_event = {"type": "end", "step": current_step, "delta": ""}
@@ -636,8 +675,10 @@ async def execute_stream_generator(
             # Signal end of stream
             await stream_queue.put(None)
     
-    # Start pipeline in background
-    asyncio.create_task(run_pipeline())
+    # Start pipeline in background and track it
+    task = asyncio.create_task(run_pipeline())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     
     # Yield transformed stream events
     async for output in consume_stream():
@@ -765,12 +806,13 @@ async def upload_endpoint(
         
         logger.info(f"Upload request for session {x_session_id}: {safe_filename}")
         
-        # Get or create session
+        # Get or create session with race condition protection
         session_key = x_session_id
-        if session_key not in _sessions:
-            # Initialize session with default config
-            cfg = initialize_config()
-            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
+        async with _session_lock:
+            if session_key not in _sessions:
+                # Initialize session with default config
+                cfg = initialize_config()
+                _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
         
         session = _sessions[session_key]
         tool_manager = session["main_agent_tool_manager"]
@@ -823,10 +865,25 @@ async def upload_endpoint(
                 return sandbox_file_path
             raise Exception(f"Upload failed: {upload_result}")
         
-        # Save file to temporary location first
+        # Save file to temporary location first with size limit
+        file_size = 0
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
+            # Read file in chunks to enforce size limit
+            chunk_size = 8192
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    # Clean up and raise error
+                    tmp_file.close()
+                    os.unlink(tmp_file.name)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is {MAX_FILE_SIZE / (1024 * 1024):.0f}MB"
+                    )
+                tmp_file.write(chunk)
             tmp_file_path = tmp_file.name
         
         try:

@@ -177,7 +177,7 @@ curl -X POST http://localhost:8000/v1/api/execute \
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file      | file | Yes      | Server-side file path |
+| file      | file | Yes      | The file to upload |
 
 #### Response Format
 ```json
