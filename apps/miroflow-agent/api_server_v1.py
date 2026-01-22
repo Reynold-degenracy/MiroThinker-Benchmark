@@ -22,6 +22,13 @@ from src.logging.task_logger import bootstrap_logger
 # Configure logger
 logger = bootstrap_logger()
 
+# Constants
+DEFAULT_SANDBOX_TIMEOUT = 3600  # 1 hour TTL for sandboxes
+TOOL_INPUT_TRUNCATE_LENGTH = 200  # Max length for displaying tool inputs
+STREAMING_CHUNK_SIZE = 10  # Character chunk size for streaming effects
+DEFAULT_HOST = "0.0.0.0"
+DEFAULT_PORT = 8000
+
 # Global configuration storage
 _cfg: Optional[DictConfig] = None
 _default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
@@ -70,7 +77,7 @@ class SessionAwareSandboxManager:
             result = await self.tool_manager.execute_tool_call(
                 server_name="tool-python",
                 tool_name="create_sandbox",
-                arguments={"timeout": 3600}  # 1 hour TTL
+                arguments={"timeout": DEFAULT_SANDBOX_TIMEOUT}
             )
             
             if "result" in result and "sandbox_id:" in result["result"]:
@@ -453,14 +460,13 @@ async def plan_stream_generator(
                         plan_text = f"Using tool: {tool_name}"
                         if tool_input:
                             input_str = json.dumps(tool_input, ensure_ascii=False)
-                            if len(input_str) > 200:
-                                input_str = input_str[:200] + "..."
+                            if len(input_str) > TOOL_INPUT_TRUNCATE_LENGTH:
+                                input_str = input_str[:TOOL_INPUT_TRUNCATE_LENGTH] + "..."
                             plan_text += f" with input: {input_str}"
                         
                         # Split into smaller chunks for streaming effect
-                        chunk_size = 10
-                        for i in range(0, len(plan_text), chunk_size):
-                            chunk = plan_text[i:i + chunk_size]
+                        for i in range(0, len(plan_text), STREAMING_CHUNK_SIZE):
+                            chunk = plan_text[i:i + STREAMING_CHUNK_SIZE]
                             plan_event = {"type": "plan", "step": current_step, "delta": chunk}
                             step_buffer.append(plan_event)
                 
@@ -868,8 +874,14 @@ def main(cfg: DictConfig) -> None:
     
     import uvicorn
     
+    # Get host and port from environment or use defaults
+    host = os.getenv("API_HOST", DEFAULT_HOST)
+    port = int(os.getenv("API_PORT", str(DEFAULT_PORT)))
+    
+    logger.info(f"Starting server on {host}:{port}")
+    
     # Run the FastAPI server
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
