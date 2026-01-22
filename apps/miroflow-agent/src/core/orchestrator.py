@@ -841,8 +841,18 @@ class Orchestrator:
         task_file_name=None,
         task_id="default_task",
         initial_message_history: Optional[List[Dict[str, str]]] = None,
+        execution_mode: str = "full",
     ):
-        """Execute the main end-to-end task"""
+        """
+        Execute the main end-to-end task.
+        
+        Args:
+            task_description: The task description
+            task_file_name: Optional file associated with the task
+            task_id: Task identifier
+            initial_message_history: Optional message history to continue from
+            execution_mode: "full" (default), "plan_only" (stop after planning), or "execute_only" (skip planning)
+        """
         workflow_id = await self._stream_start_workflow(task_description)
 
         self.task_log.log_step("info", "Main Agent", f"Start task with id: {task_id}")

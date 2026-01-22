@@ -36,6 +36,7 @@ async def execute_task_pipeline(
     initial_message_history: Optional[List[Dict[str, str]]] = None,
     tool_definitions: Optional[List[Dict[str, Any]]] = None,
     sub_agent_tool_definitions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    execution_mode: str = "full",
 ):
     """
     Executes the full pipeline for a single task.
@@ -53,6 +54,7 @@ async def execute_task_pipeline(
         stream_queue: A queue for streaming the task execution (optional).
         tool_definitions: The definitions of the tools for the main agent (optional).
         sub_agent_tool_definitions: The definitions of the tools for the sub-agents (optional).
+        execution_mode: Execution mode - "full" (default), "plan_only", or "execute_only".
     Returns:
         A tuple containing:
         - A string with the final execution log and summary, or an error message.
@@ -104,6 +106,7 @@ async def execute_task_pipeline(
             task_file_name=task_file_name,
             task_id=task_id,
             initial_message_history=initial_message_history,
+            execution_mode=execution_mode,
         )
 
         llm_client.close()
