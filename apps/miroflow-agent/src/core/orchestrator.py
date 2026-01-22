@@ -915,6 +915,9 @@ class Orchestrator:
         total_attempts = 0
         max_attempts = max_turns + 200
         consecutive_rollbacks = 0
+        
+        # For plan_only mode, we only want to collect tool calls without executing them
+        collected_plan_steps = []
 
         self.current_agent_id = await self._stream_start_agent("main")
         await self._stream_start_llm("main")
@@ -1037,6 +1040,21 @@ class Orchestrator:
                         "LLM did not request tool usage, ending process.",
                     )
                     break
+
+            # In plan_only mode, collect tool calls and stop after first successful collection
+            if execution_mode == "plan_only" and tool_calls:
+                for call in tool_calls:
+                    collected_plan_steps.append({
+                        "tool_name": call["tool_name"],
+                        "server_name": call["server_name"],
+                        "arguments": call["arguments"]
+                    })
+                self.task_log.log_step(
+                    "info",
+                    "Main Agent | Plan Only Mode",
+                    f"Collected {len(collected_plan_steps)} tool calls, stopping execution"
+                )
+                break
 
             # Execute tool calls (execute in order)
             tool_calls_data = []
@@ -1300,6 +1318,21 @@ class Orchestrator:
 
         await self._stream_end_llm("main")
         await self._stream_end_agent("main", self.current_agent_id)
+
+        # For plan_only mode, skip final summary and return the collected plan
+        if execution_mode == "plan_only":
+            await self._stream_end_workflow(workflow_id)
+            plan_summary = f"Plan generated with {len(collected_plan_steps)} steps"
+            self.task_log.log_step(
+                "info",
+                "Main Agent | Plan Only Mode Completed",
+                plan_summary
+            )
+            # Return plan as JSON string in the summary field
+            import json
+            plan_json = json.dumps(collected_plan_steps, ensure_ascii=False, indent=2)
+            gc.collect()
+            return plan_json, "Plan generated (plan_only mode)"
 
         # Record main loop end
         if turn_count >= max_turns:
