@@ -323,12 +323,18 @@ class ExecuteRequest(BaseModel):
     config_overrides: Optional[Dict[str, str]] = None
 
 
-def _validate_bearer_auth(authorization: str) -> str:
+def _validate_bearer_auth(authorization: Optional[str] = None) -> Optional[str]:
     """
-    Ensure Authorization header exists and follows Bearer scheme.
+    Validate Authorization header if provided. Authorization is optional.
+    
+    Args:
+        authorization: Optional Authorization header value
+        
+    Returns:
+        The token if authorization was provided and valid, None otherwise
     """
     if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
+        return None
     parts = authorization.split(" ", 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(status_code=401, detail="Invalid Authorization header; expected 'Bearer <token>'")
@@ -438,14 +444,32 @@ async def stream_generator(
         """Consume stream events and transform them"""
         try:
             # Emit start event immediately
-            yield json.dumps({"type": "start", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
+            start_event = json.dumps({"type": "start", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
+            logger.info(f"[Stream Output] Sending START event immediately")
+            yield start_event.encode('utf-8')
+            current_agent_name = None
+            should_process_messages = True
+            
             while True:
                 event = await stream_queue.get()
                 if event is None:  # End of stream signal
                     break
-                
+
                 event_type = event.get("event")
                 data = event.get("data", {})
+                
+                # Track current agent to skip Final Summary messages
+                if event_type == "start_of_agent":
+                    current_agent_name = data.get("agent_name", "")
+                    # Skip message streaming for "Final Summary" agent
+                    # This agent is only used to generate the final boxed answer,
+                    # and it duplicates the content already streamed by main agent
+                    should_process_messages = (current_agent_name != "Final Summary")
+                    logger.debug(f"[Agent] Started: {current_agent_name}, process_messages={should_process_messages}")
+                
+                elif event_type == "end_of_agent":
+                    agent_name = data.get("agent_name", "")
+                    logger.debug(f"[Agent] Ended: {agent_name}")
                 
                 if event_type == "tool_call":
                     tool_name = data.get("tool_name", "")
@@ -458,18 +482,26 @@ async def stream_generator(
                                 "step": step_value,
                                 "delta": f"Error: {error_text}"
                             }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
+                            output_str = json.dumps(output, ensure_ascii=False) + "\n"
+                            logger.info(f"[Stream Output] Sending ERROR event")
+                            yield output_str.encode('utf-8')
                 
                 elif event_type == "message":
-                    # Messages are assistant responses (answer phase)
-                    delta_content = data.get("delta", {}).get("content", "")
-                    if delta_content:
-                        output = {
-                            "type": "answer",
-                            "step": step_value,
-                            "delta": delta_content
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
+                    # Only stream messages from agents that are not "Final Summary"
+                    # Final Summary regenerates the answer for extraction purposes,
+                    # but we don't want to show it to users (causes duplication)
+                    if should_process_messages:
+                        delta_content = data.get("delta", {}).get("content", "")
+                        if delta_content:
+                            output = {
+                                "type": "answer",
+                                "step": step_value,
+                                "delta": delta_content
+                            }
+                            output_str = json.dumps(output, ensure_ascii=False) + "\n"
+                            yield output_str.encode('utf-8')
+                    else:
+                        pass
                 
                 elif event_type == "end_of_workflow":
                     # Workflow end - signal completion
@@ -482,13 +514,17 @@ async def stream_generator(
                 "step": step_value,
                 "delta": f"Error: {str(e)}"
             }
-            yield json.dumps(error_output, ensure_ascii=False) + "\n"
+            logger.info(f"[Stream Output] Sending ERROR event due to exception")
+            yield (json.dumps(error_output, ensure_ascii=False) + "\n").encode('utf-8')
         finally:
-            yield json.dumps({"type": "end", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
+            end_event = json.dumps({"type": "end", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
+            logger.info(f"[Stream Output] Sending END event")
+            yield end_event.encode('utf-8')
     
     # Start pipeline execution in background
     async def run_pipeline():
         try:
+            logger.info(f"[Pipeline] Starting pipeline execution for task: {task_description[:50]}...") #for debug
             await execute_task_pipeline(
                 cfg=cfg,
                 task_id=task_id,
@@ -500,23 +536,27 @@ async def stream_generator(
                 log_dir=cfg.debug_dir,
                 stream_queue=stream_queue,
             )
+            logger.info(f"[Pipeline] Pipeline execution completed") #for debug
         except Exception as e:
             logger.error(f"Error in pipeline execution: {e}", exc_info=True)
         finally:
             # Signal end of stream
+            logger.debug("[Pipeline] Sending end-of-stream signal (None)") #for debug
             await stream_queue.put(None)
     
     # Start pipeline in background
+    logger.info(f"[Stream Setup] Creating pipeline task and consume_stream generator") #for debug
     asyncio.create_task(run_pipeline())
     
-    # Yield transformed stream events
+    # Yield transformed stream events as bytes
     async for output in consume_stream():
         yield output
+        # Note: Yielding bytes directly helps with immediate flushing
 
 @app.post("/v1/api/plan")
 async def plan(
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: str = Header(..., alias="Authorization"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     content_type: str = Header(..., alias="Content-Type"),
 ):
     """Placeholder plan endpoint to satisfy client contract."""
@@ -530,7 +570,7 @@ async def plan(
 async def execute(
     request: ExecuteRequest,
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: str = Header(..., alias="Authorization"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     content_type: str = Header(..., alias="Content-Type"),
 ):
     """
@@ -590,7 +630,7 @@ async def health_check():
 async def upload(
     file: UploadFile = File(...),
     x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: str = Header(..., alias="Authorization"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """
     Upload a file directly to the E2B sandbox for the given session.

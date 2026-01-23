@@ -1,11 +1,13 @@
 #!/bin/bash
 # Test script for the MiroFlow Agent API
-# This script demonstrates how to call the /get_response endpoint
+# This script demonstrates how to call the execute and upload endpoints
 
 # Configuration
 HOST="localhost"
 PORT="8000"
 BASE_URL="http://${HOST}:${PORT}"
+SESSION_ID="sess_$(date +%s)"
+AUTH_TOKEN="Bearer test_token_xyz"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -32,38 +34,46 @@ else
 fi
 echo ""
 
-# Test 2: Simple query without history
-echo -e "${YELLOW}Test 2: Simple Query (is_confirmed=false)${NC}"
-echo "POST ${BASE_URL}/get_response"
-echo "Session ID: sess_test_001"
+# Test 2: Execute query (streaming response)
+echo -e "${YELLOW}Test 2: Execute Query (Streaming Response)${NC}"
+echo "POST ${BASE_URL}/v1/api/execute"
+echo "Session ID: $SESSION_ID"
+echo "Authorization: $AUTH_TOKEN"
 echo ""
-curl -N "${BASE_URL}/get_response" \
+curl -N "${BASE_URL}/v1/api/execute" \
   -H "Content-Type: application/json" \
-  -H "X-Session-Id: sess_test_001" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Authorization: $AUTH_TOKEN" \
   -d '{
-    "query": "What is 2 + 2?",
-    "history": null,
-    "is_confirmed": false
+    "message": [
+      {
+        "type": "query",
+        "step": 1,
+        "content": "What is 2 + 2?"
+      }
+    ]
   }' 2>&1
 
 echo ""
 echo ""
 
-# Test 3: Query with history
-echo -e "${YELLOW}Test 3: Query with History${NC}"
-echo "POST ${BASE_URL}/get_response"
-echo "Session ID: sess_test_002"
+# Test 3: Execute another query with different content
+echo -e "${YELLOW}Test 3: Execute Another Query${NC}"
+echo "POST ${BASE_URL}/v1/api/execute"
+echo "Session ID: $SESSION_ID"
 echo ""
-curl -N "${BASE_URL}/get_response" \
+curl -N "${BASE_URL}/v1/api/execute" \
   -H "Content-Type: application/json" \
-  -H "X-Session-Id: sess_test_002" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Authorization: $AUTH_TOKEN" \
   -d '{
-    "query": "帮我找到马斯克在推特上的最近一条推文",
-    "history": [
-      {"role": "user", "content": "你好"},
-      {"role": "assistant", "content": "你好，有什么可以帮你? "}
-    ],
-    "is_confirmed": false
+    "message": [
+      {
+        "type": "query",
+        "step": 1,
+        "content": "Find the Latest tweet of Elon Musk."
+      }
+    ]
   }' 2>&1
 
 echo ""
@@ -71,18 +81,20 @@ echo ""
 
 # Test 4: File Upload
 echo -e "${YELLOW}Test 4: File Upload${NC}"
-echo "POST ${BASE_URL}/upload_file"
-echo "Session ID: sess_test_003"
+echo "POST ${BASE_URL}/upload"
+echo "Session ID: $SESSION_ID"
+echo "Authorization: $AUTH_TOKEN"
 echo ""
 
 # Create a temporary test file
-TEST_FILE="/tmp/test_upload.txt"
+TEST_FILE="/tmp/test_upload_$(date +%s).txt"
 echo "This is a test file for upload." > "$TEST_FILE"
 echo "Created test file: $TEST_FILE"
 echo ""
 
-curl "${BASE_URL}/upload_file" \
-  -H "X-Session-Id: sess_test_003" \
+curl -s "${BASE_URL}/upload" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Authorization: $AUTH_TOKEN" \
   -F "file=@${TEST_FILE}" 2>&1
 
 echo ""

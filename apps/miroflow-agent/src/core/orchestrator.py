@@ -101,7 +101,9 @@ class Orchestrator:
                     "event": event_type,
                     "data": data,
                 }
+                logger.debug(f"[Orchestrator Stream] Putting event '{event_type}' into queue") #for debug
                 await self.stream_queue.put(stream_message)
+                logger.debug(f"[Orchestrator Stream] Successfully queued event '{event_type}'") #for debug
             except Exception as e:
                 logger.warning(f"Failed to send stream update: {e}")
 
