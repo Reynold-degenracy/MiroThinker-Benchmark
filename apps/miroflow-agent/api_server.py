@@ -524,7 +524,6 @@ async def stream_generator(
     # Start pipeline execution in background
     async def run_pipeline():
         try:
-            logger.info(f"[Pipeline] Starting pipeline execution for task: {task_description[:50]}...") #for debug
             await execute_task_pipeline(
                 cfg=cfg,
                 task_id=task_id,
@@ -536,16 +535,13 @@ async def stream_generator(
                 log_dir=cfg.debug_dir,
                 stream_queue=stream_queue,
             )
-            logger.info(f"[Pipeline] Pipeline execution completed") #for debug
         except Exception as e:
             logger.error(f"Error in pipeline execution: {e}", exc_info=True)
         finally:
             # Signal end of stream
-            logger.debug("[Pipeline] Sending end-of-stream signal (None)") #for debug
             await stream_queue.put(None)
     
     # Start pipeline in background
-    logger.info(f"[Stream Setup] Creating pipeline task and consume_stream generator") #for debug
     asyncio.create_task(run_pipeline())
     
     # Yield transformed stream events as bytes

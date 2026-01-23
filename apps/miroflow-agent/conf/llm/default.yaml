@@ -6,7 +6,7 @@ temperature: 0.3
 top_p: 1.0
 min_p: 0.0
 top_k: -1
-max_tokens: 4096
+max_tokens: 32768
 api_key: ${oc.env:OPENAI_API_KEY}
 base_url: https://openrouter.ai/api/v1
 max_context_length: 1048576

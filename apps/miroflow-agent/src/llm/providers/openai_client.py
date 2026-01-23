@@ -115,19 +115,13 @@ class OpenAIClient(BaseClient):
         usage_data = None
         message_id = str(uuid.uuid4())
         
-        logger.info(f"[LLM Stream] _handle_streaming_response called, stream_queue={stream_queue is not None}") #for debug
-        chunk_count = 0 #for debug
-        
         try:
             async for chunk in stream:
-                chunk_count += 1 #for debug
                 if not chunk.choices:
                     continue
                     
                 choice = chunk.choices[0]
                 delta = choice.delta
-                
-                logger.debug(f"[LLM Stream] Received chunk #{chunk_count}, has_content={hasattr(delta, 'content') and delta.content is not None}") #for debug
                 
                 # Handle content streaming
                 if hasattr(delta, "content") and delta.content:
@@ -135,7 +129,6 @@ class OpenAIClient(BaseClient):
                     # Send streaming update
                     if stream_queue:
                         try:
-                            logger.debug(f"[LLM Stream] Putting message delta into queue: {repr(delta.content[:20])}") #for debug
                             await stream_queue.put({
                                 "event": "message",
                                 "data": {
@@ -145,7 +138,6 @@ class OpenAIClient(BaseClient):
                                     },
                                 },
                             })
-                            logger.debug(f"[LLM Stream] Successfully queued message delta") #for debug
                         except Exception as e:
                             logger.warning(f"Failed to send stream update: {e}")
                 
@@ -404,8 +396,6 @@ class OpenAIClient(BaseClient):
         :param stream_queue: Optional queue for streaming updates.
         :return: OpenAI API response object or None (if error occurs).
         """
-        logger.info(f"[LLM Create Message] Starting, stream_queue={stream_queue is not None}, async_client={self.async_client}") #for debug
-
         # Create a copy for sending to LLM (to avoid modifying the original)
         messages_for_llm = [m.copy() for m in messages_history]
 
@@ -465,20 +455,14 @@ class OpenAIClient(BaseClient):
             if "deepseek-v3-1" in self.model_name:
                 params["extra_body"]["thinking"] = {"type": "enabled"}
 
-            logger.info(f"[LLM API] Making API call with stream={params.get('stream')}, async_client={self.async_client}") #for debug
-            
             try:
                 if self.async_client:
-                    logger.info(f"[LLM API] Using async client for streaming") #for debug
                     stream = await self.client.chat.completions.create(**params)
                     # Process streaming response
-                    logger.info(f"[LLM API] Received stream object, calling _handle_streaming_response") #for debug
                     response = await self._handle_streaming_response(
                         stream, stream_queue
                     )
-                    logger.info(f"[LLM API] _handle_streaming_response completed") #for debug
                 else:
-                    logger.info(f"[LLM API] Using sync client, wrapping as async") #for debug
                     # For sync client, we need to wrap in async
                     stream = self.client.chat.completions.create(**params)
                     # Convert sync stream to async by wrapping each iteration
