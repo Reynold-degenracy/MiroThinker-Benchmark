@@ -311,12 +311,37 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MiroFlow Agent API", lifespan=lifespan)
 
 
-class QueryRequest(BaseModel):
-    query: str
-    history: Optional[List[Dict[str, str]]] = None
-    is_confirmed: bool
+class ExecuteMessage(BaseModel):
+    type: str
+    step: Optional[int] = 1
+    content: str
+
+
+class ExecuteRequest(BaseModel):
+    message: List[ExecuteMessage]
     # Optional Hydra configuration overrides
     config_overrides: Optional[Dict[str, str]] = None
+
+
+def _validate_bearer_auth(authorization: str) -> str:
+    """
+    Ensure Authorization header exists and follows Bearer scheme.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid Authorization header; expected 'Bearer <token>'")
+    token = parts[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    return token
+
+
+def _validate_json_content_type(content_type: str) -> None:
+    """Ensure Content-Type is application/json (charset allowed)."""
+    if not content_type or "application/json" not in content_type.lower():
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
 
 
 def initialize_config(overrides: Optional[List[str]] = None):
@@ -359,26 +384,24 @@ def initialize_config(overrides: Optional[List[str]] = None):
 
 
 async def stream_generator(
-    query: str,
-    history: Optional[List[Dict[str, str]]],
-    is_confirmed: bool,
+    messages: List[ExecuteMessage],
     session_id: str,
     config_overrides: Optional[Dict[str, str]] = None,
 ):
     """
     Generate streaming responses in NDJSON format.
     
-    Transforms internal streaming events to the required format:
-    - {"status":"plan", "step": 1, "data":"..."}
-    - {"status":"answer", "data":"..."}
-    
-    Args:
-        query: User query
-        history: Conversation history (currently not used)
-        is_confirmed: Whether plan is confirmed
-        session_id: Session identifier
-        config_overrides: Optional Hydra config overrides (e.g., {"llm.provider": "qwen", "llm.base_url": "http://..."})
+    Output format:
+    - {"type": "start", "step": 1, "delta": ""}
+    - {"type": "answer", "step": 1, "delta": "..."}
+    - {"type": "end", "step": 1, "delta": ""}
     """
+    if not messages:
+        raise HTTPException(status_code=400, detail="message is required")
+    primary_message = next((msg for msg in messages if msg.type == "query"), messages[0])
+    # Client expects step to stay at 1 in the stream
+    step_value = 1
+    query = primary_message.content
     # Create async queue for receiving streaming updates
     stream_queue = asyncio.Queue()
     
@@ -411,15 +434,11 @@ async def stream_generator(
     task_description = query
     task_file_name = ""
     
-    # Track current step for plan events
-    current_step = 0
-    in_plan_phase = not is_confirmed
-    
     async def consume_stream():
         """Consume stream events and transform them"""
-        nonlocal current_step
-        
         try:
+            # Emit start event immediately
+            yield json.dumps({"type": "start", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
             while True:
                 event = await stream_queue.get()
                 if event is None:  # End of stream signal
@@ -428,44 +447,16 @@ async def stream_generator(
                 event_type = event.get("event")
                 data = event.get("data", {})
                 
-                # Transform events to NDJSON format
                 if event_type == "tool_call":
                     tool_name = data.get("tool_name", "")
                     tool_input = data.get("tool_input", data.get("delta_input", {}))
-                    
-                    # show_text tool is used to display answers, but we skip it during streaming
-                    # because the content is already being streamed via "message" events
-                    # This prevents duplication of content
-                    if tool_name == "show_text":
-                        # Skip show_text during streaming to avoid duplication
-                        pass
-                    
-                    # show_error is for errors, also treat as answer
-                    elif tool_name == "show_error":
+                    if tool_name == "show_error":
                         error_text = tool_input.get("error", "")
                         if error_text:
                             output = {
-                                "status": "answer",
-                                "data": f"Error: {error_text}"
-                            }
-                            yield json.dumps(output, ensure_ascii=False) + "\n"
-                    
-                    # Other tool calls are planning steps
-                    else:
-                        if in_plan_phase:
-                            current_step += 1
-                            plan_text = f"Using tool: {tool_name}"
-                            if tool_input:
-                                # Truncate large inputs for display
-                                input_str = json.dumps(tool_input, ensure_ascii=False)
-                                if len(input_str) > 200:
-                                    input_str = input_str[:200] + "..."
-                                plan_text += f" with input: {input_str}"
-                            
-                            output = {
-                                "status": "plan",
-                                "step": current_step,
-                                "data": plan_text
+                                "type": "answer",
+                                "step": step_value,
+                                "delta": f"Error: {error_text}"
                             }
                             yield json.dumps(output, ensure_ascii=False) + "\n"
                 
@@ -473,34 +464,10 @@ async def stream_generator(
                     # Messages are assistant responses (answer phase)
                     delta_content = data.get("delta", {}).get("content", "")
                     if delta_content:
-                        # Send content immediately for real-time streaming
-                        # No buffering - stream each token/chunk as it arrives from LLM
                         output = {
-                            "status": "answer",
-                            "data": delta_content
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                
-                elif event_type == "start_of_agent":
-                    # Starting an agent indicates planning
-                    if in_plan_phase:
-                        current_step += 1
-                        agent_name = data.get("display_name", data.get("agent_name", "agent"))
-                        output = {
-                            "status": "plan",
-                            "step": current_step,
-                            "data": f"Starting agent: {agent_name}"
-                        }
-                        yield json.dumps(output, ensure_ascii=False) + "\n"
-                
-                elif event_type == "start_of_workflow":
-                    # Workflow start
-                    if in_plan_phase:
-                        current_step += 1
-                        output = {
-                            "status": "plan",
-                            "step": current_step,
-                            "data": "Workflow started"
+                            "type": "answer",
+                            "step": step_value,
+                            "delta": delta_content
                         }
                         yield json.dumps(output, ensure_ascii=False) + "\n"
                 
@@ -511,10 +478,13 @@ async def stream_generator(
         except Exception as e:
             logger.error(f"Error in stream consumer: {e}", exc_info=True)
             error_output = {
-                "status": "answer",
-                "data": f"Error: {str(e)}"
+                "type": "answer",
+                "step": step_value,
+                "delta": f"Error: {str(e)}"
             }
             yield json.dumps(error_output, ensure_ascii=False) + "\n"
+        finally:
+            yield json.dumps({"type": "end", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
     
     # Start pipeline execution in background
     async def run_pipeline():
@@ -543,59 +513,67 @@ async def stream_generator(
     async for output in consume_stream():
         yield output
 
-
-@app.post("/get_response")
-async def get_response(
-    request: QueryRequest,
+@app.post("/v1/api/plan")
+async def plan(
     x_session_id: str = Header(..., alias="X-Session-Id"),
+    authorization: str = Header(..., alias="Authorization"),
+    content_type: str = Header(..., alias="Content-Type"),
+):
+    """Placeholder plan endpoint to satisfy client contract."""
+    _validate_json_content_type(content_type)
+    _validate_bearer_auth(authorization)
+    logger.info(f"Plan endpoint hit for session {x_session_id}")
+    return {"status": "ok"}
+
+
+@app.post("/v1/api/execute")
+async def execute(
+    request: ExecuteRequest,
+    x_session_id: str = Header(..., alias="X-Session-Id"),
+    authorization: str = Header(..., alias="Authorization"),
+    content_type: str = Header(..., alias="Content-Type"),
 ):
     """
     Submit a question and stream Scheduler's full output.
     
-    Args:
-        request: Request body containing query, history, is_confirmed, and optional config_overrides
-        x_session_id: Session ID from header
+    Expected headers:
+    - Content-Type: application/json
+    - X-Session-Id: <session>
+    - Authorization: Bearer <token>
     
-    Returns:
-        StreamingResponse with NDJSON format:
-        - {"status":"plan", "step": 1, "data":"..."}
-        - {"status":"answer", "data":"..."}
+    Body example:
+    {
+      "message": [
+        {"type": "query", "step": 1, "content": "xxx"}
+      ]
+    }
     
-    Note:
-        The 'history' parameter is currently not used by the underlying
-        orchestrator implementation. Each request starts a new conversation.
-        Future versions may support conversation history.
-        
-        The 'config_overrides' parameter allows overriding Hydra configuration
-        settings, such as LLM provider, model name, base_url, etc.
-        Example: {"llm.provider": "qwen", "llm.base_url": "http://localhost:8000/v1"}
+    Streamed response (NDJSON):
+    {"type": "start", "step": 1, "delta": ""}
+    {"type": "answer", "step": 1, "delta": "..."}
+    {"type": "end", "step": 1, "delta": ""}
     """
     try:
-        logger.info(f"Received request for session {x_session_id}: {request.query}")
+        _validate_json_content_type(content_type)
+        _validate_bearer_auth(authorization)
+        if not request.message:
+            raise HTTPException(status_code=400, detail="message is required")
+        primary_message = next((msg for msg in request.message if msg.type == "query"), request.message[0])
+        logger.info(f"Received execute request for session {x_session_id}: {primary_message.content}")
         
-        # Note: history parameter is accepted but not currently used
-        # The orchestrator initializes its own message history
-        if request.history:
-            logger.warning(
-                f"History parameter provided but not currently supported. "
-                f"Starting new conversation for session {x_session_id}"
-            )
-        
-        # Log config overrides if provided
         if request.config_overrides:
             logger.info(f"Config overrides provided: {request.config_overrides}")
         
         return StreamingResponse(
             stream_generator(
-                query=request.query,
-                history=request.history,
-                is_confirmed=request.is_confirmed,
+                messages=request.message,
                 session_id=x_session_id,
                 config_overrides=request.config_overrides,
             ),
             media_type="application/x-ndjson",
         )
-    
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error processing request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -607,10 +585,12 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.post("/upload_file")
-async def upload_file(
+@app.post("/v1/api/upload")
+@app.post("/upload")
+async def upload(
     file: UploadFile = File(...),
     x_session_id: str = Header(..., alias="X-Session-Id"),
+    authorization: str = Header(..., alias="Authorization"),
 ):
     """
     Upload a file directly to the E2B sandbox for the given session.
@@ -618,6 +598,7 @@ async def upload_file(
     Args:
         file: The file to upload (from multipart/form-data)
         x_session_id: Session ID from header
+        authorization: Bearer token header
     
     Returns:
         JSON response with the file path in the sandbox
@@ -628,8 +609,10 @@ async def upload_file(
         - Files are uploaded directly to the E2B sandbox, not the API server
         - Sandbox lifecycle is 3600 seconds (default TTL)
         - The server is stateless and does not maintain conversation history
+        - Endpoint available at /v1/api/upload and /upload
     """
     try:
+        _validate_bearer_auth(authorization)
         # Validate filename
         if not file.filename or file.filename.strip() == "":
             raise HTTPException(status_code=400, detail="Filename is required")

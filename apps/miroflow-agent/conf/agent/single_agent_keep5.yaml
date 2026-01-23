@@ -7,11 +7,10 @@ defaults:
 
 main_agent:
   tools:
-    - search_and_scrape_webpage
+    - tool-google-search  # Google search via Serper API (requires SERPER_API_KEY)
     - jina_scrape_llm_summary
     - tool-python
   tool_blacklist:
-    - [ "search_and_scrape_webpage", "sougou_search" ]
     - [ "tool-python", "download_file_from_sandbox_to_local" ]
   max_turns: 600  # Maximum number of turns for main agent execution
 
