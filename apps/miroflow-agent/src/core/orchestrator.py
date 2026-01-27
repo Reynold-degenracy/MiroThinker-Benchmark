@@ -16,7 +16,7 @@ from miroflow_tools.manager import ToolManager
 from omegaconf import DictConfig
 
 from ..config.settings import expose_sub_agents_as_tools
-from ..io.input_handler import process_input
+from ..io.input_handler import process_input, process_input_for_multimodal
 from ..io.output_formatter import OutputFormatter
 from ..llm.factory import ClientFactory
 from ..logging.task_logger import (
@@ -855,9 +855,16 @@ class Orchestrator:
             )
 
         # Process input
-        initial_user_content, processed_task_desc = process_input(
-            task_description, task_file_name
-        )
+        # Use multimodal input processing if enabled in config
+        use_multimodal = getattr(self.cfg.agent, "multimodal_input", False)
+        if use_multimodal:
+            initial_user_content, processed_task_desc = process_input_for_multimodal(
+                task_description, task_file_name
+            )
+        else:
+            initial_user_content, processed_task_desc = process_input(
+                task_description, task_file_name
+            )
 
         # Initialize message history. If the caller provided an initial_message_history
         # (from previous requests), reuse it and append the current user input so the

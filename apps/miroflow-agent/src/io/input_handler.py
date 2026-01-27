@@ -410,6 +410,111 @@ Please provide a concise summary of the relevant information from the video that
         return ""
 
 
+def process_input_for_multimodal(task_description, task_file_name):
+    """
+    Process user input for multimodal LLM, handling image and audio files with base64 encoding.
+    
+    This is a wrapper function designed for multimodal LLM APIs (like single_agent_keep5).
+    For image and audio files, it returns base64-encoded content that can be directly
+    passed to the LLM API. For other file types, it delegates to process_input().
+    
+    Args:
+        task_description: The task description text
+        task_file_name: Path to the associated file (can be None)
+    
+    Returns:
+        A tuple of (initial_user_content, updated_task_description) where:
+        - For image files: initial_user_content is a list containing text and image_url dicts
+        - For audio files: initial_user_content is a list containing text and input_audio dicts
+        - For other files: both values are strings (from process_input)
+    """
+    if not task_file_name:
+        return process_input(task_description, task_file_name)
+    
+    file_extension = task_file_name.rsplit(".", maxsplit=1)[-1].lower()
+    
+    # Handle image files with base64 encoding
+    if file_extension in ["jpg", "jpeg", "png", "gif", "webp"]:
+        try:
+            with open(task_file_name, "rb") as image_file:
+                image_data = base64.b64encode(image_file.read()).decode("utf-8")
+            
+            # Determine MIME type
+            mime_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get("." + file_extension, "image/jpeg")
+            
+            # Create task description with file reference
+            updated_task_description = task_description
+            updated_task_description += f"\n\nNote: An image file '{task_file_name}' is associated with this task. The image content is provided below for direct analysis."
+            updated_task_description += "\nYou should follow the format instruction in the request strictly and wrap the final answer in \\boxed{}."
+            
+            # Create multimodal content list
+            initial_user_content = [
+                {"type": "text", "text": updated_task_description},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{image_data}"},
+                },
+            ]
+            
+            return initial_user_content, updated_task_description
+            
+        except FileNotFoundError:
+            print(f"Error: File not found {task_file_name}")
+            # Fall back to process_input for error handling
+            return process_input(task_description, task_file_name)
+        except Exception as e:
+            print(f"Error: Error processing image file {task_file_name}: {e}")
+            traceback.print_exc()
+            return process_input(task_description, task_file_name)
+    
+    # Handle audio files with base64 encoding
+    elif file_extension in ["wav", "mp3", "m4a"]:
+        try:
+            with open(task_file_name, "rb") as audio_file:
+                audio_data = base64.b64encode(audio_file.read()).decode("utf-8")
+            
+            # Determine audio format
+            audio_format = {
+                ".mp3": "mp3",
+                ".wav": "wav",
+                ".m4a": "m4a",
+            }.get("." + file_extension, "mp3")
+            
+            # Create task description with file reference
+            updated_task_description = task_description
+            updated_task_description += f"\n\nNote: An audio file '{task_file_name}' is associated with this task. The audio content is provided below for direct analysis."
+            updated_task_description += "\nYou should follow the format instruction in the request strictly and wrap the final answer in \\boxed{}."
+            
+            # Create multimodal content list
+            initial_user_content = [
+                {"type": "text", "text": updated_task_description},
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": audio_data, "format": audio_format},
+                },
+            ]
+            
+            return initial_user_content, updated_task_description
+            
+        except FileNotFoundError:
+            print(f"Error: File not found {task_file_name}")
+            return process_input(task_description, task_file_name)
+        except Exception as e:
+            print(f"Error: Error processing audio file {task_file_name}: {e}")
+            traceback.print_exc()
+            return process_input(task_description, task_file_name)
+    
+    # For all other file types, delegate to the original process_input function
+    else:
+        return process_input(task_description, task_file_name)
+
+
 def process_input(task_description, task_file_name):
     """
     Process user input, especially files.
