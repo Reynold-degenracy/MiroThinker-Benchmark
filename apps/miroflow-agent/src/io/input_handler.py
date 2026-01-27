@@ -431,7 +431,9 @@ def process_input_for_multimodal(task_description, task_file_name):
     if not task_file_name:
         return process_input(task_description, task_file_name)
     
-    file_extension = task_file_name.rsplit(".", maxsplit=1)[-1].lower()
+    # Safely extract file extension, handling files without extensions
+    parts = task_file_name.rsplit(".", maxsplit=1)
+    file_extension = parts[-1].lower() if len(parts) > 1 else ""
     
     # Handle image files with base64 encoding
     if file_extension in ["jpg", "jpeg", "png", "gif", "webp"]:
@@ -439,14 +441,16 @@ def process_input_for_multimodal(task_description, task_file_name):
             with open(task_file_name, "rb") as image_file:
                 image_data = base64.b64encode(image_file.read()).decode("utf-8")
             
-            # Determine MIME type
+            # Determine MIME type using os.path.splitext for consistency with existing code
+            _, ext = os.path.splitext(task_file_name)
+            ext = ext.lower()
             mime_type = {
                 ".jpg": "image/jpeg",
                 ".jpeg": "image/jpeg",
                 ".png": "image/png",
                 ".gif": "image/gif",
                 ".webp": "image/webp",
-            }.get("." + file_extension, "image/jpeg")
+            }.get(ext, "image/jpeg")
             
             # Create task description with file reference
             updated_task_description = task_description
@@ -479,12 +483,8 @@ def process_input_for_multimodal(task_description, task_file_name):
             with open(task_file_name, "rb") as audio_file:
                 audio_data = base64.b64encode(audio_file.read()).decode("utf-8")
             
-            # Determine audio format
-            audio_format = {
-                ".mp3": "mp3",
-                ".wav": "wav",
-                ".m4a": "m4a",
-            }.get("." + file_extension, "mp3")
+            # Audio format is the same as the extension (without the dot)
+            audio_format = file_extension
             
             # Create task description with file reference
             updated_task_description = task_description
