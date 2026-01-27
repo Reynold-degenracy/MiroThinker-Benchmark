@@ -299,26 +299,36 @@ def test_functional_with_temp_files():
         # Try to import the function
         from src.io.input_handler import process_input_for_multimodal
         
-        # Create a temporary image file
+        # Create a temporary image file with a minimal valid PNG
+        # PNG structure: signature (8 bytes) + IHDR chunk + IDAT chunk + IEND chunk
+        # This creates a 1x1 transparent RGBA pixel PNG image for testing
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as img_file:
-            # Write a minimal PNG header (1x1 transparent pixel)
+            # Minimal PNG: 1x1 transparent pixel
+            # Structure breakdown:
+            # - PNG signature: 89 50 4E 47 0D 0A 1A 0A (8 bytes)
+            # - IHDR chunk: 13-byte header with width=1, height=1, RGBA format
+            # - IDAT chunk: compressed image data
+            # - IEND chunk: end marker
             png_data = bytes([
                 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # PNG signature
-                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR chunk
-                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-                0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-                0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
-                0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR chunk start
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,  # width=1, height=1
+                0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,  # 8-bit RGBA, CRC
+                0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,  # IDAT chunk start
+                0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,  # compressed data
+                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,  # CRC
+                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,  # IEND chunk
                 0x42, 0x60, 0x82
             ])
             img_file.write(png_data)
             img_path = img_file.name
         
-        # Create a temporary audio file
+        # Create a temporary audio file with a minimal MP3 frame header
+        # MP3 frame structure: sync word (0xFFE or 0xFFF) + header bits
+        # This is not a valid playable MP3 but sufficient for testing base64 encoding
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as audio_file:
-            # Write minimal MP3 header
+            # MP3 frame header: 0xFFE (sync) + Layer 3, 128kbps, 44.1kHz
+            # Followed by padding bytes to simulate frame data
             mp3_data = bytes([0xFF, 0xFB, 0x90, 0x00] + [0x00] * 100)
             audio_file.write(mp3_data)
             audio_path = audio_file.name
