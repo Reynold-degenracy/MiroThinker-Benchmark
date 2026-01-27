@@ -551,15 +551,23 @@ async def stream_generator(
 
 @app.post("/v1/api/plan")
 async def plan(
+    request: ExecuteRequest,
     x_session_id: str = Header(..., alias="X-Session-Id"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
     content_type: str = Header(..., alias="Content-Type"),
 ):
-    """Placeholder plan endpoint to satisfy client contract."""
+    """Return the question from the request."""
     _validate_json_content_type(content_type)
     _validate_bearer_auth(authorization)
-    logger.info(f"Plan endpoint hit for session {x_session_id}")
-    return {"status": "ok"}
+    
+    if not request.message:
+        raise HTTPException(status_code=400, detail="message is required")
+    
+    primary_message = next((msg for msg in request.message if msg.type == "query"), request.message[0])
+    question = primary_message.content
+    
+    logger.info(f"Plan endpoint hit for session {x_session_id}: {question}")
+    return {"question": question}
 
 
 @app.post("/v1/api/execute")
@@ -776,7 +784,7 @@ def main(cfg: DictConfig) -> None:
     import uvicorn
     
     # Run the FastAPI server
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=7210)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 
 # Configuration
 HOST="localhost"
-PORT="8000"
+PORT="7210"
 BASE_URL="http://${HOST}:${PORT}"
 SESSION_ID="sess_$(date +%s)"
 AUTH_TOKEN="Bearer test_token_xyz"
