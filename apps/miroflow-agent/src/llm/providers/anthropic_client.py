@@ -578,8 +578,9 @@ class AnthropicClient(BaseClient):
                             text = item.get("text", "")
                             total_tokens += len(self.encoding.encode(text))
                         elif item_type == "image_url" or item_type == "image":
-                            # Fixed estimate for images
-                            total_tokens += 1000
+                            # Fixed estimate for images (use conservative estimate to avoid
+                            # context window issues with high-detail large images)
+                            total_tokens += 3000
                         elif item_type == "input_audio":
                             # Fixed estimate for audio content
                             total_tokens += 500

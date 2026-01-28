@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import hydra
+from hydra.core.global_hydra import GlobalHydra
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from omegaconf import DictConfig, OmegaConf
@@ -350,6 +351,24 @@ def _validate_json_content_type(content_type: str) -> None:
         raise HTTPException(status_code=415, detail="Content-Type must be application/json")
 
 
+def _hydra_compose_with_overrides(overrides: List[str]) -> DictConfig:
+    """
+    Compose Hydra config with overrides, properly handling GlobalHydra state.
+    
+    Args:
+        overrides: List of Hydra override strings
+        
+    Returns:
+        Composed DictConfig
+    """
+    # Clear any existing Hydra state to avoid "already initialized" errors
+    if GlobalHydra.instance().is_initialized():
+        GlobalHydra.instance().clear()
+    
+    with hydra.initialize(config_path="conf", version_base=None):
+        return hydra.compose(config_name="config", overrides=overrides)
+
+
 def initialize_config(overrides: Optional[List[str]] = None):
     """
     Initialize Hydra configuration with optional overrides.
@@ -387,10 +406,8 @@ def initialize_config(overrides: Optional[List[str]] = None):
             # If there are config group overrides, we need to use Hydra compose
             if config_group_overrides:
                 # Combine CLI defaults with new config group selections
-                # First, extract the current defaults from _default_cfg (if available)
                 all_overrides = config_group_overrides + simple_overrides
-                with hydra.initialize(config_path="conf", version_base=None):
-                    return hydra.compose(config_name="config", overrides=all_overrides)
+                return _hydra_compose_with_overrides(all_overrides)
             
             # For simple key-value overrides, use OmegaConf.update
             merged_cfg = OmegaConf.create(_default_cfg)
@@ -403,14 +420,11 @@ def initialize_config(overrides: Optional[List[str]] = None):
     
     # Otherwise, initialize with default config
     if _cfg is None:
-        # Initialize Hydra with default config (only once at startup)
-        with hydra.initialize(config_path="conf", version_base=None):
-            _cfg = hydra.compose(config_name="config")
+        _cfg = _hydra_compose_with_overrides([])
     
     # If overrides are provided, create a new config with those overrides
     if overrides:
-        with hydra.initialize(config_path="conf", version_base=None):
-            return hydra.compose(config_name="config", overrides=overrides)
+        return _hydra_compose_with_overrides(overrides)
     
     return _cfg
 

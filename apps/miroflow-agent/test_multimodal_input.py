@@ -4,7 +4,6 @@ Test script to verify multimodal input processing functionality.
 Tests the process_input_for_multimodal() function in input_handler.py.
 """
 
-import base64
 import os
 import sys
 import tempfile

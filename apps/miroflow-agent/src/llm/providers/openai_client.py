@@ -706,9 +706,10 @@ class OpenAIClient(BaseClient):
                             text = item.get("text", "")
                             total_tokens += len(self.encoding.encode(text))
                         elif item_type == "image_url":
-                            # Fixed estimate for images (OpenAI uses ~85 tokens for low detail, 
-                            # 170+ for high detail; use conservative estimate)
-                            total_tokens += 1000
+                            # Fixed estimate for images (OpenAI uses ~85 tokens for low detail,
+                            # and high-detail large images can exceed 2700 tokens; use a more
+                            # conservative estimate to avoid context window issues)
+                            total_tokens += 3000
                         elif item_type == "input_audio":
                             # Fixed estimate for audio content
                             total_tokens += 500

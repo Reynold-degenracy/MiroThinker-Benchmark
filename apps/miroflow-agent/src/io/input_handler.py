@@ -469,11 +469,11 @@ def process_input_for_multimodal(task_description, task_file_name):
             return initial_user_content, updated_task_description
             
         except FileNotFoundError:
-            print(f"Error: File not found {task_file_name}")
+            print(f"File not found: {task_file_name}")
             # Fall back to process_input for error handling
             return process_input(task_description, task_file_name)
         except Exception as e:
-            print(f"Error: Error processing image file {task_file_name}: {e}")
+            print(f"Error processing image file {task_file_name}: {e}")
             traceback.print_exc()
             return process_input(task_description, task_file_name)
     
@@ -503,10 +503,10 @@ def process_input_for_multimodal(task_description, task_file_name):
             return initial_user_content, updated_task_description
             
         except FileNotFoundError:
-            print(f"Error: File not found {task_file_name}")
+            print(f"File not found: {task_file_name}")
             return process_input(task_description, task_file_name)
         except Exception as e:
-            print(f"Error: Error processing audio file {task_file_name}: {e}")
+            print(f"Error processing audio file {task_file_name}: {e}")
             traceback.print_exc()
             return process_input(task_description, task_file_name)
     
