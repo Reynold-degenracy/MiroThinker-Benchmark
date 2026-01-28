@@ -16,7 +16,7 @@ from miroflow_tools.manager import ToolManager
 from omegaconf import DictConfig
 
 from ..config.settings import expose_sub_agents_as_tools
-from ..io.input_handler import process_input
+from ..io.input_handler import process_input, process_input_multimodal
 from ..io.output_formatter import OutputFormatter
 from ..llm.factory import ClientFactory
 from ..logging.task_logger import (
@@ -841,8 +841,19 @@ class Orchestrator:
         task_file_name=None,
         task_id="default_task",
         initial_message_history: Optional[List[Dict[str, str]]] = None,
+        enable_multimodal: bool = True,
     ):
-        """Execute the main end-to-end task"""
+        """Execute the main end-to-end task
+        
+        Args:
+            task_description: The task description
+            task_file_name: Optional file associated with the task
+            task_id: Unique identifier for this task
+            initial_message_history: Optional existing message history to continue from
+            enable_multimodal: If True, processes multimodal files (images/audio/video) 
+                              as base64 for direct LLM consumption. If False, uses 
+                              caption/transcription mode.
+        """
         workflow_id = await self._stream_start_workflow(task_description)
 
         self.task_log.log_step("info", "Main Agent", f"Start task with id: {task_id}")
@@ -854,22 +865,48 @@ class Orchestrator:
                 "info", "Main Agent", f"Associated file: {task_file_name}"
             )
 
-        # Process input
-        initial_user_content, processed_task_desc = process_input(
-            task_description, task_file_name
-        )
+        # Process input - use multimodal processing if enabled
+        multimodal_content = None
+        if enable_multimodal:
+            initial_user_content, multimodal_content = process_input_multimodal(
+                task_description, task_file_name, direct_multimodal=True
+            )
+            if multimodal_content:
+                self.task_log.log_step(
+                    "info", 
+                    "Main Agent | Multimodal", 
+                    f"Processing {multimodal_content['type']} file directly for LLM"
+                )
+        else:
+            initial_user_content, _ = process_input(task_description, task_file_name)
+        
+        # If multimodal processing wasn't enabled or didn't produce multimodal content,
+        # fall back to standard text processing
+        if multimodal_content is None and enable_multimodal:
+            initial_user_content, _ = process_input(task_description, task_file_name)
 
-        # Initialize message history. If the caller provided an initial_message_history
-        # (from previous requests), reuse it and append the current user input so the
-        # LLM has full context. Otherwise start a fresh history with the current user input.
+        # Initialize message history with appropriate format based on content type
         if initial_message_history:
             # Copy to avoid mutating caller's list
             message_history = list(initial_message_history)
-            message_history.append({"role": "user", "content": initial_user_content})
+            # Add new user message with potential multimodal content
+            if multimodal_content and hasattr(self.llm_client, 'update_message_history_with_multimodal'):
+                message_history = self.llm_client.update_message_history_with_multimodal(
+                    message_history, initial_user_content, multimodal_content
+                )
+            else:
+                message_history.append({"role": "user", "content": initial_user_content})
         else:
-            message_history = [{"role": "user", "content": initial_user_content}]
+            if multimodal_content and hasattr(self.llm_client, 'update_message_history_with_multimodal'):
+                message_history = []
+                message_history = self.llm_client.update_message_history_with_multimodal(
+                    message_history, initial_user_content, multimodal_content
+                )
+            else:
+                message_history = [{"role": "user", "content": initial_user_content}]
 
         # Record initial user input
+        processed_task_desc = initial_user_content
         user_input = processed_task_desc
         if task_file_name:
             user_input += f"\n[Attached file: {task_file_name}]"

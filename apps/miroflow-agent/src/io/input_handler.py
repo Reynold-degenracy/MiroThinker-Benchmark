@@ -633,6 +633,91 @@ def process_input(task_description, task_file_name):
     return updated_task_description, updated_task_description
 
 
+def process_input_multimodal(task_description: str, task_file_name: str = None, direct_multimodal: bool = True):
+    """
+    Process user input with support for multimodal content.
+    
+    This function extends process_input to support two modes:
+    1. Caption/transcription mode (direct_multimodal=False): Uses existing infrastructure to convert 
+       images/audio/video to text descriptions (captions/transcriptions).
+    2. Direct multimodal mode (direct_multimodal=True): Returns base64 encoded content for direct 
+       LLM consumption when the LLM supports multimodal input.
+    
+    Args:
+        task_description: The user's task description
+        task_file_name: Optional path to an associated file
+        direct_multimodal: If True and the file is a multimodal type (image/audio/video) and small enough,
+                          returns base64 encoded data for direct LLM consumption instead of captions.
+    
+    Returns:
+        Tuple of (text_content, multimodal_content):
+        - text_content: The processed task description as text (str)
+        - multimodal_content: None if no multimodal content, or a dict containing:
+            {
+                "type": "image" | "audio" | "video",
+                "base64_data": str,
+                "mime_type": str,
+                "file_path": str
+            }
+    """
+    from .multimodal_builder import (
+        is_multimodal_file,
+        should_use_direct_encoding,
+        read_file_as_base64,
+        get_mime_type_for_image,
+        get_audio_format,
+        get_mime_type_for_video,
+        is_image_file,
+        is_audio_file,
+        is_video_file,
+    )
+    
+    multimodal_content = None
+    
+    # Check if we should process this file as direct multimodal content
+    if task_file_name and direct_multimodal and is_multimodal_file(task_file_name):
+        if should_use_direct_encoding(task_file_name):
+            # Read file as base64 for direct LLM consumption
+            base64_data = read_file_as_base64(task_file_name)
+            if base64_data:
+                # Determine content type
+                if is_image_file(task_file_name):
+                    mime_type = get_mime_type_for_image(task_file_name)
+                    multimodal_content = {
+                        "type": "image",
+                        "base64_data": base64_data,
+                        "mime_type": mime_type,
+                        "file_path": task_file_name
+                    }
+                elif is_audio_file(task_file_name):
+                    audio_format = get_audio_format(task_file_name)
+                    multimodal_content = {
+                        "type": "audio",
+                        "base64_data": base64_data,
+                        "format": audio_format,
+                        "file_path": task_file_name
+                    }
+                elif is_video_file(task_file_name):
+                    mime_type = get_mime_type_for_video(task_file_name)
+                    multimodal_content = {
+                        "type": "video",
+                        "base64_data": base64_data,
+                        "mime_type": mime_type,
+                        "file_path": task_file_name
+                    }
+                
+                if multimodal_content:
+                    # Add note about the file being processed directly
+                    updated_task_description = task_description
+                    updated_task_description += f"\n\nNote: A {multimodal_content['type']} file '{task_file_name}' is associated with this task and will be provided directly for analysis."
+                    updated_task_description += "\nYou should follow the format instruction in the request strictly and wrap the final answer in \\boxed{}."
+                    return updated_task_description, multimodal_content
+    
+    # Fall back to original process_input for text-based processing
+    text_content, _ = process_input(task_description, task_file_name)
+    return text_content, None
+
+
 class _CustomMarkdownify(markdownify.MarkdownConverter):
     """
     A custom version of markdownify's MarkdownConverter. Changes include:

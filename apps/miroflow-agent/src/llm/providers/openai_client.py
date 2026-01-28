@@ -656,23 +656,128 @@ class OpenAIClient(BaseClient):
     def update_message_history(
         self, message_history: List[Dict], all_tool_results_content_with_id: List[Tuple]
     ) -> List[Dict]:
-        """Update message history with tool calls data (llm client specific)"""
-
-        merged_text = "\n".join(
-            [
-                item[1]["text"]
-                for item in all_tool_results_content_with_id
-                if item[1]["type"] == "text"
-            ]
-        )
-
-        message_history.append(
-            {
+        """Update message history with tool calls data (llm client specific).
+        
+        Supports both text-only and multimodal tool results. When multimodal content
+        is present (images, audio, video), constructs appropriate multimodal message format.
+        """
+        # Separate text and multimodal content
+        text_parts = []
+        multimodal_parts = []
+        
+        for item in all_tool_results_content_with_id:
+            call_id, content = item
+            if isinstance(content, dict):
+                if content.get("type") == "text":
+                    text_parts.append(content["text"])
+                elif content.get("type") in ("image", "image_url"):
+                    # Image content
+                    multimodal_parts.append(content)
+                elif content.get("type") == "input_audio":
+                    # Audio content
+                    multimodal_parts.append(content)
+        
+        # Build message content
+        if multimodal_parts:
+            # Build multimodal message
+            message_content = []
+            
+            # Add text content first
+            if text_parts:
+                merged_text = "\n".join(text_parts)
+                message_content.append({"type": "text", "text": merged_text})
+            
+            # Add multimodal content
+            message_content.extend(multimodal_parts)
+            
+            message_history.append({
+                "role": "user",
+                "content": message_content
+            })
+        else:
+            # Text-only message
+            merged_text = "\n".join(text_parts)
+            message_history.append({
                 "role": "user",
                 "content": merged_text,
-            }
-        )
+            })
 
+        return message_history
+
+    def update_message_history_with_multimodal(
+        self,
+        message_history: List[Dict],
+        text_content: Optional[str],
+        multimodal_content: Optional[Dict]
+    ) -> List[Dict]:
+        """Update message history with potential multimodal content.
+        
+        This method is used to add user messages that may include images, audio, or video
+        directly in the message content for multimodal LLM processing.
+        
+        Args:
+            message_history: The current message history
+            text_content: Text content to include in the message
+            multimodal_content: Optional multimodal content dict with keys:
+                - type: "image", "audio", or "video"
+                - base64_data: Base64 encoded file data
+                - mime_type: MIME type for images/videos
+                - format: Audio format for audio files
+                
+        Returns:
+            Updated message history
+        """
+        if not multimodal_content:
+            # No multimodal content, just add text
+            message_history.append({
+                "role": "user",
+                "content": text_content or ""
+            })
+            return message_history
+        
+        # Build multimodal message
+        content = []
+        
+        # Add text first
+        if text_content:
+            content.append({"type": "text", "text": text_content})
+        
+        # Add multimodal content based on type
+        content_type = multimodal_content.get("type")
+        base64_data = multimodal_content.get("base64_data")
+        
+        if content_type == "image":
+            mime_type = multimodal_content.get("mime_type", "image/jpeg")
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{base64_data}"
+                }
+            })
+        elif content_type == "audio":
+            audio_format = multimodal_content.get("format", "mp3")
+            content.append({
+                "type": "input_audio",
+                "input_audio": {
+                    "data": base64_data,
+                    "format": audio_format
+                }
+            })
+        elif content_type == "video":
+            mime_type = multimodal_content.get("mime_type", "video/mp4")
+            # Videos are sent using image_url type with video MIME type
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{base64_data}"
+                }
+            })
+        
+        message_history.append({
+            "role": "user",
+            "content": content
+        })
+        
         return message_history
 
     def generate_agent_system_prompt(self, date: Any, mcp_servers: List[Dict]) -> str:

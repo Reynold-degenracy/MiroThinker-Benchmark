@@ -462,5 +462,118 @@ async def download_file_from_sandbox_to_local(
             pass  # Ignore timeout setting errors
 
 
+# Supported MIME types for multimodal content
+MULTIMODAL_MIME_TYPES = {
+    # Images
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    # Audio
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/m4a",
+    # Video
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+}
+
+# Maximum file size for base64 encoding (20MB)
+MAX_BASE64_FILE_SIZE = 20 * 1024 * 1024
+
+
+@mcp.tool()
+async def read_file_as_base64_from_sandbox(
+    sandbox_id: str, sandbox_file_path: str
+) -> str:
+    """Read a file from the sandbox and return it as base64 encoded data. Supports images (jpg, png, gif, webp), audio (mp3, wav, m4a), and video (mp4, mov) files.
+
+    This tool is useful when you need to pass multimodal content (images, audio, video) directly to the LLM for analysis.
+    The returned base64 data can be used to construct multimodal messages.
+
+    Args:
+        sandbox_id: The id of the sandbox to read the file from. To have a sandbox, use tool `create_sandbox`.
+        sandbox_file_path: The path of the file to read on the sandbox.
+
+    Returns:
+        A JSON string containing the base64 encoded file data and its MIME type in the format:
+        {"base64_data": "...", "mime_type": "image/jpeg", "file_path": "/home/user/image.jpg"}
+        Or an error message if the operation fails.
+    """
+    import base64
+    import json
+
+    if sandbox_id in INVALID_SANDBOX_IDS:
+        return f"[ERROR]: '{sandbox_id}' is not a valid sandbox_id. Please create a real sandbox first using the create_sandbox tool."
+
+    try:
+        sandbox = Sandbox.connect(sandbox_id, api_key=E2B_API_KEY)
+    except Exception:
+        return f"[ERROR]: Failed to connect to sandbox {sandbox_id}. Make sure the sandbox is created and the sandbox_id is correct."
+
+    try:
+        sandbox.set_timeout(DEFAULT_TIMEOUT)
+
+        # Check file extension
+        _, ext = os.path.splitext(sandbox_file_path)
+        ext = ext.lower()
+        mime_type = MULTIMODAL_MIME_TYPES.get(ext)
+        
+        if not mime_type:
+            supported_formats = ", ".join(MULTIMODAL_MIME_TYPES.keys())
+            return f"[ERROR]: Unsupported file format '{ext}'. Supported formats: {supported_formats}"
+
+        # Check if the file exists and is not a directory
+        check_result = sandbox.commands.run(
+            f'test -f {shlex.quote(sandbox_file_path)} && echo "is_file" || echo "not_file"'
+        )
+        if check_result.stdout and "not_file" in check_result.stdout:
+            return f"[ERROR]: File '{sandbox_file_path}' does not exist or is a directory in sandbox {sandbox_id}."
+
+        # Check file size
+        size_result = sandbox.commands.run(
+            f'stat -c %s {shlex.quote(sandbox_file_path)} 2>/dev/null || stat -f %z {shlex.quote(sandbox_file_path)}'
+        )
+        try:
+            file_size = int(size_result.stdout.strip())
+            if file_size > MAX_BASE64_FILE_SIZE:
+                return f"[ERROR]: File '{sandbox_file_path}' is too large ({file_size} bytes). Maximum size for base64 encoding is {MAX_BASE64_FILE_SIZE} bytes (20MB)."
+        except (ValueError, AttributeError):
+            # If we can't determine file size, proceed anyway and let the read fail if too large
+            pass
+
+        # Read the file content
+        try:
+            content = sandbox.files.read(sandbox_file_path, format="bytes")
+        except Exception as read_error:
+            error_details = str(read_error)[:MAX_ERROR_LEN]
+            return f"[ERROR]: Failed to read file '{sandbox_file_path}' from sandbox {sandbox_id}: {error_details}"
+
+        # Encode as base64
+        base64_data = base64.b64encode(content).decode("utf-8")
+
+        # Return as JSON
+        result = {
+            "base64_data": base64_data,
+            "mime_type": mime_type,
+            "file_path": sandbox_file_path,
+            "file_size": len(content)
+        }
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        error_details = str(e)[:MAX_ERROR_LEN]
+        return f"[ERROR]: Failed to read file '{sandbox_file_path}' from sandbox {sandbox_id}: {error_details}"
+    finally:
+        try:
+            sandbox.set_timeout(DEFAULT_TIMEOUT)
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
