@@ -167,18 +167,11 @@ async def scrape_url_with_jina(
             "all_content_displayed": False,
         }
 
-    # Get API key from environment
+    # Get API key from environment (optional - Jina API works without key but may have rate limits)
     if not JINA_API_KEY:
-        return {
-            "success": False,
-            "filename": "",
-            "content": "",
-            "error": "JINA_API_KEY environment variable is not set",
-            "line_count": 0,
-            "char_count": 0,
-            "last_char_line": 0,
-            "all_content_displayed": False,
-        }
+        logger.info(
+            f"JINA_API_KEY not set, using Jina API without authentication (may have rate limits)"
+        )
 
     # Avoid duplicate Jina URL prefix
     if url.startswith("https://r.jina.ai/") and url.count("http") >= 2:
@@ -189,9 +182,11 @@ async def scrape_url_with_jina(
 
     try:
         # Prepare headers
-        headers = {
-            "Authorization": f"Bearer {JINA_API_KEY}",
-        }
+        headers = {}
+        
+        # Add Authorization header only if API key is available
+        if JINA_API_KEY:
+            headers["Authorization"] = f"Bearer {JINA_API_KEY}"
 
         # Add custom headers if provided
         if custom_headers:
