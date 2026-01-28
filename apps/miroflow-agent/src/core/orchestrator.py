@@ -877,12 +877,9 @@ class Orchestrator:
                     "Main Agent | Multimodal", 
                     f"Processing {multimodal_content['type']} file directly for LLM"
                 )
+            # Note: process_input_multimodal already falls back to process_input internally
+            # when direct multimodal processing isn't applicable
         else:
-            initial_user_content, _ = process_input(task_description, task_file_name)
-        
-        # If multimodal processing wasn't enabled or didn't produce multimodal content,
-        # fall back to standard text processing
-        if multimodal_content is None and enable_multimodal:
             initial_user_content, _ = process_input(task_description, task_file_name)
 
         # Initialize message history with appropriate format based on content type

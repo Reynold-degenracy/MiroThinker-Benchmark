@@ -722,7 +722,7 @@ class OpenAIClient(BaseClient):
                 - type: "image", "audio", or "video"
                 - base64_data: Base64 encoded file data
                 - mime_type: MIME type for images/videos
-                - format: Audio format for audio files
+                - format: Audio format for audio files (used instead of mime_type for audio)
                 
         Returns:
             Updated message history
@@ -745,6 +745,22 @@ class OpenAIClient(BaseClient):
         # Add multimodal content based on type
         content_type = multimodal_content.get("type")
         base64_data = multimodal_content.get("base64_data")
+        
+        # Validate base64_data is present and not empty
+        if not base64_data:
+            logger.warning(f"Multimodal content of type '{content_type}' has empty or missing base64_data")
+            # Fall back to text-only message if no valid multimodal data
+            if content:
+                message_history.append({
+                    "role": "user",
+                    "content": content
+                })
+            else:
+                message_history.append({
+                    "role": "user",
+                    "content": text_content or ""
+                })
+            return message_history
         
         if content_type == "image":
             mime_type = multimodal_content.get("mime_type", "image/jpeg")
@@ -772,11 +788,20 @@ class OpenAIClient(BaseClient):
                     "url": f"data:{mime_type};base64,{base64_data}"
                 }
             })
+        else:
+            logger.warning(f"Unknown multimodal content type: {content_type}")
         
-        message_history.append({
-            "role": "user",
-            "content": content
-        })
+        # Ensure we have at least some content to add
+        if not content:
+            message_history.append({
+                "role": "user",
+                "content": text_content or ""
+            })
+        else:
+            message_history.append({
+                "role": "user",
+                "content": content
+            })
         
         return message_history
 

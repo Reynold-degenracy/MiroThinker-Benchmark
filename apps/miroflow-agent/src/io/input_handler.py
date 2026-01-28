@@ -653,12 +653,12 @@ def process_input_multimodal(task_description: str, task_file_name: str = None, 
         Tuple of (text_content, multimodal_content):
         - text_content: The processed task description as text (str)
         - multimodal_content: None if no multimodal content, or a dict containing:
-            {
-                "type": "image" | "audio" | "video",
-                "base64_data": str,
-                "mime_type": str,
-                "file_path": str
-            }
+            For images:
+                {"type": "image", "base64_data": str, "mime_type": str, "file_path": str}
+            For audio:
+                {"type": "audio", "base64_data": str, "format": str, "file_path": str}
+            For video:
+                {"type": "video", "base64_data": str, "mime_type": str, "file_path": str}
     """
     from .multimodal_builder import (
         is_multimodal_file,
@@ -708,6 +708,7 @@ def process_input_multimodal(task_description: str, task_file_name: str = None, 
                 
                 if multimodal_content:
                     # Add note about the file being processed directly
+                    # Note: The format instruction is already added by process_input when falling back
                     updated_task_description = task_description
                     updated_task_description += f"\n\nNote: A {multimodal_content['type']} file '{task_file_name}' is associated with this task and will be provided directly for analysis."
                     updated_task_description += "\nYou should follow the format instruction in the request strictly and wrap the final answer in \\boxed{}."

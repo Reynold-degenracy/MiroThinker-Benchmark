@@ -99,7 +99,7 @@ def is_audio_file(file_path: str) -> bool:
 def is_video_file(file_path: str) -> bool:
     """Check if file is a supported video format."""
     ext = os.path.splitext(file_path)[1].lower()
-    return VIDEO_EXTENSIONS.get(ext) is not None
+    return ext in VIDEO_EXTENSIONS
 
 
 def is_multimodal_file(file_path: str) -> bool:

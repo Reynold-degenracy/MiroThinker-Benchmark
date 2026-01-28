@@ -2,6 +2,8 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
+import base64
+import json
 import os
 import shlex
 from urllib.parse import urlparse
@@ -473,7 +475,7 @@ MULTIMODAL_MIME_TYPES = {
     # Audio
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
-    ".m4a": "audio/m4a",
+    ".m4a": "audio/mp4",  # Standard MIME type for .m4a files
     # Video
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
@@ -500,13 +502,10 @@ async def read_file_as_base64_from_sandbox(
         sandbox_file_path: The path of the file to read on the sandbox.
 
     Returns:
-        A JSON string containing the base64 encoded file data and its MIME type in the format:
-        {"base64_data": "...", "mime_type": "image/jpeg", "file_path": "/home/user/image.jpg"}
+        A JSON string containing the base64 encoded file data and metadata in the format:
+        {"base64_data": "...", "mime_type": "image/jpeg", "file_path": "/home/user/image.jpg", "file_size": 12345}
         Or an error message if the operation fails.
     """
-    import base64
-    import json
-
     if sandbox_id in INVALID_SANDBOX_IDS:
         return f"[ERROR]: '{sandbox_id}' is not a valid sandbox_id. Please create a real sandbox first using the create_sandbox tool."
 
