@@ -472,7 +472,7 @@ MULTIMODAL_MIME_TYPES = {
     ".png": "image/png",
     ".gif": "image/gif",
     ".webp": "image/webp",
-    # Audio
+    # Audio - MIME types for reference/documentation
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",  # Standard MIME type for .m4a files
@@ -484,6 +484,17 @@ MULTIMODAL_MIME_TYPES = {
     ".webm": "video/webm",
 }
 
+# Audio format strings for OpenAI API (separate from MIME types)
+# OpenAI's input_audio expects format strings like "mp3", not full MIME types
+AUDIO_FORMATS = {
+    ".mp3": "mp3",
+    ".wav": "wav",
+    ".m4a": "m4a",
+}
+
+# Audio file extensions for type checking
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a"}
+
 # Maximum file size for base64 encoding (20MB)
 MAX_BASE64_FILE_SIZE = 20 * 1024 * 1024
 
@@ -492,7 +503,7 @@ MAX_BASE64_FILE_SIZE = 20 * 1024 * 1024
 async def read_file_as_base64_from_sandbox(
     sandbox_id: str, sandbox_file_path: str
 ) -> str:
-    """Read a file from the sandbox and return it as base64 encoded data. Supports images (jpg, png, gif, webp), audio (mp3, wav, m4a), and video (mp4, mov) files.
+    """Read a file from the sandbox and return it as base64 encoded data. Supports images (jpg, png, gif, webp), audio (mp3, wav, m4a), and video (mp4, mov, avi, mkv, webm) files.
 
     This tool is useful when you need to pass multimodal content (images, audio, video) directly to the LLM for analysis.
     The returned base64 data can be used to construct multimodal messages.
@@ -503,7 +514,8 @@ async def read_file_as_base64_from_sandbox(
 
     Returns:
         A JSON string containing the base64 encoded file data and metadata in the format:
-        {"base64_data": "...", "mime_type": "image/jpeg", "file_path": "/home/user/image.jpg", "file_size": 12345}
+        - For images/videos: {"base64_data": "...", "mime_type": "image/jpeg", "file_path": "...", "file_size": 12345}
+        - For audio: {"base64_data": "...", "mime_type": "audio/mpeg", "audio_format": "mp3", "file_path": "...", "file_size": 12345}
         Or an error message if the operation fails.
     """
     if sandbox_id in INVALID_SANDBOX_IDS:
@@ -533,7 +545,7 @@ async def read_file_as_base64_from_sandbox(
         if check_result.stdout and "not_file" in check_result.stdout:
             return f"[ERROR]: File '{sandbox_file_path}' does not exist or is a directory in sandbox {sandbox_id}."
 
-        # Check file size
+        # Check file size - fail safely if size cannot be determined
         size_result = sandbox.commands.run(
             f'stat -c %s {shlex.quote(sandbox_file_path)} 2>/dev/null || stat -f %z {shlex.quote(sandbox_file_path)}'
         )
@@ -542,8 +554,12 @@ async def read_file_as_base64_from_sandbox(
             if file_size > MAX_BASE64_FILE_SIZE:
                 return f"[ERROR]: File '{sandbox_file_path}' is too large ({file_size} bytes). Maximum size for base64 encoding is {MAX_BASE64_FILE_SIZE} bytes (20MB)."
         except (ValueError, AttributeError):
-            # If we can't determine file size, proceed anyway and let the read fail if too large
-            pass
+            # If we can't determine file size, fail safely instead of reading the file into memory
+            return (
+                f"[ERROR]: Unable to determine size of file '{sandbox_file_path}' in sandbox {sandbox_id}. "
+                f"File cannot be read for base64 encoding because the maximum allowed size is "
+                f"{MAX_BASE64_FILE_SIZE} bytes (20MB)."
+            )
 
         # Read the file content
         try:
@@ -555,13 +571,18 @@ async def read_file_as_base64_from_sandbox(
         # Encode as base64
         base64_data = base64.b64encode(content).decode("utf-8")
 
-        # Return as JSON
+        # Build result with appropriate fields based on file type
         result = {
             "base64_data": base64_data,
             "mime_type": mime_type,
             "file_path": sandbox_file_path,
             "file_size": len(content)
         }
+        
+        # For audio files, also include the audio_format field (used by OpenAI's input_audio API)
+        if ext in AUDIO_EXTENSIONS:
+            result["audio_format"] = AUDIO_FORMATS.get(ext)
+        
         return json.dumps(result, ensure_ascii=False)
 
     except Exception as e:

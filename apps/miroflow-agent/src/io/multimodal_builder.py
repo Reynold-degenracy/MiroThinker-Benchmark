@@ -23,6 +23,9 @@ IMAGE_EXTENSIONS = {
     ".webp": "image/webp",
 }
 
+# Audio extensions map to format strings (not MIME types) because OpenAI's
+# input_audio API expects format strings like "mp3", not full MIME types.
+# This is consistent with AUDIO_FORMATS in python_mcp_server.py
 AUDIO_EXTENSIONS = {
     ".mp3": "mp3",
     ".wav": "wav",
