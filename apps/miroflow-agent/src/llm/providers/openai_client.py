@@ -678,8 +678,14 @@ class OpenAIClient(BaseClient):
     def generate_agent_system_prompt(self, date: Any, mcp_servers: List[Dict]) -> str:
         return generate_mcp_system_prompt(date, mcp_servers)
 
-    def _estimate_tokens(self, text: str) -> int:
-        """Use tiktoken to estimate the number of tokens in text"""
+    def _estimate_tokens(self, content: Union[str, List]) -> int:
+        """Use tiktoken to estimate the number of tokens in content.
+        
+        Args:
+            content: Either a string or a list (for multimodal content).
+                     For lists, extracts text parts and estimates tokens.
+                     For image/audio content, uses a fixed estimate.
+        """
         if not hasattr(self, "encoding"):
             # Initialize tiktoken encoder
             try:
@@ -689,7 +695,32 @@ class OpenAIClient(BaseClient):
                 self.encoding = tiktoken.get_encoding("cl100k_base")
 
         try:
-            return len(self.encoding.encode(text))
+            # Handle multimodal content (list format)
+            if isinstance(content, list):
+                total_tokens = 0
+                for item in content:
+                    if isinstance(item, dict):
+                        item_type = item.get("type", "")
+                        if item_type == "text":
+                            # Estimate tokens for text content
+                            text = item.get("text", "")
+                            total_tokens += len(self.encoding.encode(text))
+                        elif item_type == "image_url":
+                            # Fixed estimate for images (OpenAI uses ~85 tokens for low detail, 
+                            # 170+ for high detail; use conservative estimate)
+                            total_tokens += 1000
+                        elif item_type == "input_audio":
+                            # Fixed estimate for audio content
+                            total_tokens += 500
+                        else:
+                            # Unknown type, skip or use minimal estimate
+                            total_tokens += 10
+                    elif isinstance(item, str):
+                        total_tokens += len(self.encoding.encode(item))
+                return total_tokens
+            else:
+                # Standard string content
+                return len(self.encoding.encode(content))
         except Exception as e:
             # If encoding fails, use simple estimation: approximately 1 token per 4 characters
             self.task_log.log_step(
@@ -697,7 +728,10 @@ class OpenAIClient(BaseClient):
                 "LLM | Token Estimation Error",
                 f"Error: {str(e)}",
             )
-            return len(text) // 4
+            if isinstance(content, list):
+                # For lists, estimate based on string representation length
+                return len(str(content)) // 4
+            return len(content) // 4
 
     def ensure_summary_context(
         self, message_history: list, summary_prompt: str
