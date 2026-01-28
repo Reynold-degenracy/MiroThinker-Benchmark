@@ -362,13 +362,39 @@ def initialize_config(overrides: Optional[List[str]] = None):
     """
     global _cfg, _default_cfg
     
+    # Config groups that require Hydra compose (these are directory names in conf/)
+    CONFIG_GROUPS = {"agent", "llm", "benchmark"}
+    
     # If we have a CLI-provided default config, use it as base
     if _default_cfg is not None:
         if overrides:
-            # Apply additional overrides on top of CLI config using OmegaConf.merge
-            # This preserves CLI settings and applies request-specific overrides
-            merged_cfg = OmegaConf.create(_default_cfg)
+            # Check if any override is a config group selector (e.g., "agent=single_agent_keep5")
+            # Config group overrides need to be handled via Hydra compose
+            config_group_overrides = []
+            simple_overrides = []
+            
             for override in overrides:
+                if "=" in override:
+                    key, value = override.split("=", 1)
+                    # Check if this is a config group selector (key without dots and in CONFIG_GROUPS)
+                    if "." not in key and key in CONFIG_GROUPS:
+                        config_group_overrides.append(override)
+                    else:
+                        simple_overrides.append(override)
+                else:
+                    simple_overrides.append(override)
+            
+            # If there are config group overrides, we need to use Hydra compose
+            if config_group_overrides:
+                # Combine CLI defaults with new config group selections
+                # First, extract the current defaults from _default_cfg (if available)
+                all_overrides = config_group_overrides + simple_overrides
+                with hydra.initialize(config_path="conf", version_base=None):
+                    return hydra.compose(config_name="config", overrides=all_overrides)
+            
+            # For simple key-value overrides, use OmegaConf.update
+            merged_cfg = OmegaConf.create(_default_cfg)
+            for override in simple_overrides:
                 # Parse override string (e.g., "llm.temperature=0.7")
                 key, value = override.split("=", 1)
                 OmegaConf.update(merged_cfg, key, value, merge=True)
