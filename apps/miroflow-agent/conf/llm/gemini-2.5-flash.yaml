@@ -1,6 +1,6 @@
-# conf/llm/default.yaml - Default LLM configuration
-provider: "openai" # openai, anthropic, qwen - OpenRouter uses OpenAI-compatible API
-model_name: "openai/gpt-5.2"
+# gemini-2.5-flash.yaml - Gemini 2.5 Flash LLM configuration
+provider: "openai" # openai, anthropic, qwen, google - OpenRouter uses OpenAI-compatible API
+model_name: "google/gemini-2.5-flash"
 async_client: true  # Enable async client for proper streaming support
 temperature: 0.3
 top_p: 1.0
