@@ -13,6 +13,13 @@ Key features:
 - Supports streaming responses
 - Supports tool calls
 - Supports token statistics
+
+Note on tool naming:
+    Tool names are combined as "{server_name}-{tool_name}" when sent to AgentHub.
+    When parsing back, the first hyphen is used as delimiter. This means if server
+    names contain hyphens, parsing may be incorrect (e.g., "my-server-tool" becomes
+    server="my", tool="server-tool"). Ensure server names don't contain hyphens,
+    or rely on MCP tag parsing as fallback.
 """
 
 import asyncio
@@ -27,6 +34,32 @@ from ...utils.prompt_utils import generate_mcp_system_prompt
 from ..base_client import BaseClient
 
 logger = logging.getLogger("miroflow_agent")
+
+
+class AgentHubMockResponse:
+    """
+    Mock response object that mimics the structure expected by the orchestration system.
+    
+    This class provides compatibility between AgentHub's UniMessage format and
+    the response format expected by MiroFlow-Agent's process_llm_response method.
+    """
+    
+    def __init__(self, uni_message: Dict[str, Any]):
+        """
+        Initialize mock response from a UniMessage dictionary.
+        
+        Args:
+            uni_message: UniMessage dictionary from AgentHub containing:
+                - content_items: List of content items (text, tool_call, thinking, etc.)
+                - usage_metadata: Token usage information
+                - finish_reason: Why the response ended (stop, length, etc.)
+        """
+        self.content_items = uni_message.get("content_items", [])
+        self.usage_metadata = uni_message.get("usage_metadata")
+        self.finish_reason = uni_message.get("finish_reason", "stop")
+        self.id = str(uuid.uuid4())
+        self.model = None
+        self.role = "assistant"
 
 
 @dataclasses.dataclass
@@ -52,11 +85,9 @@ class AgentHubClient(BaseClient):
         self._client_type: Optional[str] = self.cfg.llm.get("client_type", None)
         self._prompt_caching: str = self.cfg.llm.get("prompt_caching", "enable")
 
-        # Token usage tracking specific to AgentHub
-        self.last_call_tokens: Dict[str, int] = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-        }
+        # Note: last_call_tokens is intentionally initialized here to ensure it exists
+        # before ensure_summary_context might access it. Other clients initialize it
+        # only in _update_token_usage, but we need a safe default for first access.
 
     def _create_client(self) -> Any:
         """
@@ -64,13 +95,17 @@ class AgentHubClient(BaseClient):
 
         Returns:
             AutoLLMClient instance configured with the model and API settings
+        
+        Note:
+            The package is published as 'agenthub-sdk' on PyPI but is imported as 'agenthub'.
         """
         try:
             from agenthub import AutoLLMClient
         except ImportError as e:
             raise ImportError(
                 "agenthub-sdk is not installed. "
-                "Please install it with: pip install agenthub-sdk"
+                "Please install it with: pip install agenthub-sdk "
+                "(the package is imported as 'agenthub')"
             ) from e
 
         client_kwargs = {
@@ -80,6 +115,18 @@ class AgentHubClient(BaseClient):
         # Add optional configuration
         if self.api_key:
             client_kwargs["api_key"] = self.api_key
+            # Log with masked API key for security
+            masked_key = f"{self.api_key[:6]}...{self.api_key[-4:]}" if len(self.api_key) > 10 else "***"
+            logger.info(
+                f"AgentHub Client Init | Model: {self.model_name} | "
+                f"Base URL: {self.base_url or 'default'} | API Key: {masked_key}"
+            )
+        else:
+            logger.warning(
+                f"AgentHub Client Init | Model: {self.model_name} | "
+                f"Base URL: {self.base_url or 'default'} | API Key: NOT SET"
+            )
+
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         if self._client_type:
@@ -355,6 +402,11 @@ class AgentHubClient(BaseClient):
 
         Args:
             usage_data: UsageMetadata dictionary from AgentHub response
+        
+        Note:
+            AgentHub's UsageMetadata does not provide cache_write_tokens (cache creation tokens).
+            The total_cache_write_input_tokens field remains at 0 as AgentHub does not track this
+            metric separately. Only cache_read (cached_tokens) is available from the API.
         """
         if usage_data:
             input_tokens = usage_data.get("prompt_tokens", 0) or 0
@@ -369,9 +421,12 @@ class AgentHubClient(BaseClient):
             }
 
             # Update cumulative totals
+            # Note: total_cache_write_input_tokens is not tracked by AgentHub
+            # (AgentHub only provides cached_tokens which represents cache reads)
             self.token_usage["total_input_tokens"] += input_tokens
             self.token_usage["total_output_tokens"] += output_tokens + thoughts_tokens
             self.token_usage["total_cache_read_input_tokens"] += cached_tokens
+            # total_cache_write_input_tokens is left at 0 as AgentHub doesn't track this
 
             self.task_log.log_step(
                 "info",
@@ -508,7 +563,7 @@ class AgentHubClient(BaseClient):
             )
             raise
 
-    def _build_mock_response(self, uni_message: Dict[str, Any]) -> Any:
+    def _build_mock_response(self, uni_message: Dict[str, Any]) -> AgentHubMockResponse:
         """
         Build a mock response object compatible with process_llm_response.
 
@@ -519,18 +574,9 @@ class AgentHubClient(BaseClient):
             uni_message: UniMessage dictionary from AgentHub
 
         Returns:
-            MockResponse object with content_items, usage, and finish_reason
+            AgentHubMockResponse object with content_items, usage, and finish_reason
         """
-        class MockResponse:
-            def __init__(self, uni_msg: Dict[str, Any]):
-                self.content_items = uni_msg.get("content_items", [])
-                self.usage_metadata = uni_msg.get("usage_metadata")
-                self.finish_reason = uni_msg.get("finish_reason", "stop")
-                self.id = str(uuid.uuid4())
-                self.model = None
-                self.role = "assistant"
-
-        return MockResponse(uni_message)
+        return AgentHubMockResponse(uni_message)
 
     def process_llm_response(
         self, llm_response: Any, message_history: List[Dict], agent_type: str = "main"
@@ -624,6 +670,12 @@ class AgentHubClient(BaseClient):
 
         Returns:
             List of tool call dictionaries with server_name, tool_name, arguments, id
+        
+        Note:
+            Tool names are combined as "{server_name}-{tool_name}" when sent to AgentHub.
+            When parsing back, the first hyphen is used as delimiter. If server names
+            contain hyphens, the parsing may be incorrect. In such cases, falls back to
+            MCP tag parsing from the response text.
         """
         from ...utils.parsing_utils import parse_llm_response_for_tool_calls
 
