@@ -191,6 +191,10 @@ cfg.llm.thinking_level = "medium"  # 新增：支持 thinking
 
 **文件位置：** `/home/shinonome/MiroThinker/apps/miroflow-agent/conf/llm/agenthub-gemini.yaml`
 
+### 4.4 `conf/llm/agenthub-gpt.yaml` (配置文件)
+
+**文件位置：** `/home/shinonome/MiroThinker/apps/miroflow-agent/conf/llm/agenthub-gpt.yaml`
+
 ---
 
 ## 5. 需要修改的文件
