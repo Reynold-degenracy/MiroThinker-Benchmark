@@ -221,3 +221,6 @@ data/
 
 # test scripts
 test_*.sh
+
+# llm gen docs
+llm_gen_docs/

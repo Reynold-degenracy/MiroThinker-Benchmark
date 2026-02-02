@@ -424,22 +424,24 @@ def process_input(task_description, task_file_name):
             parsing_result = None
 
             if file_extension in ["jpg", "jpeg", "png", "gif", "webp"]:
-                # Generate unconditional image caption
-                caption = _generate_image_caption(task_file_name)
-
-                # Extract task-relevant information directly from the image
-                relevant_info = _extract_task_relevant_info_from_image(
-                    task_file_name, task_description
-                )
-
-                # Format as Markdown
-                file_content_section += f"\n\nNote: An image file '{task_file_name}' is associated with this task. The content has been extracted as a detailed caption below. You may use available tools to process its content if necessary. If you need to further process this file in the sandbox, please upload it to the sandbox first.\n\n"
-                file_content_section += f"## Image Content\nFile: {task_file_name}\n\n"
-                file_content_section += f"> {caption}\n\n"
-
-                if relevant_info:
-                    file_content_section += "Task-Relevant Information:\n\n"
-                    file_content_section += f"{relevant_info}\n\n"
+                # Read image and encode as base64
+                with open(task_file_name, "rb") as image_file:
+                    image_data = base64.b64encode(image_file.read()).decode("utf-8")
+                
+                # Guess MIME type
+                _, ext = os.path.splitext(task_file_name)
+                ext = ext.lower()
+                mime_type = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                }.get(ext, "image/jpeg")
+                
+                # Format as Markdown with base64 data
+                file_content_section += f"\n\n## Image Content\nFile: {task_file_name}\n\n"
+                file_content_section += f"![{task_file_name}](data:{mime_type};base64,{image_data})\n\n"
 
             elif file_extension == "py":
                 # Python files - read directly
