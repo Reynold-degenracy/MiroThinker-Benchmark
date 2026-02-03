@@ -411,11 +411,13 @@ class OpenAIClient(BaseClient):
                         if pre_text:
                             new_content.append({"type": "text", "text": pre_text})
                         
-                        image_url = match.group(1)
-                        new_content.append({"type": "image_url", "image_url":{
-                            "url": f"data:image/png;base64,{image_url}",
+                        image_url = match.group(1).strip()
+                        new_content.append({"type": "image_url", 
+                                            "image_url":{
+                            "url": image_url,
                             "detail": "high" # GAIA 图片细节通常很重要，必须开 High
-                        }})
+                        }}
+                        )
                         last_pos = match.end()
                     post_text = content_str[last_pos:].strip()
                     if post_text:
