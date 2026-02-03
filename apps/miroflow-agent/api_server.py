@@ -30,6 +30,41 @@ _default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
 _sessions: Dict[str, Dict] = {}
 
 
+def _parse_command_result_stdout(result_str: str) -> Optional[str]:
+    """
+    Parse stdout from CommandResult string format.
+    
+    Example input: "CommandResult(stderr=, stdout='filename.png\n', exit_code=0, error=)"
+    Returns: "filename.png"
+    
+    Args:
+        result_str: The CommandResult string
+        
+    Returns:
+        The stdout content, or None if parsing fails
+    """
+    import re
+    
+    # Match stdout=... pattern
+    match = re.search(r'stdout=([^,\)]*)', result_str)
+    if match:
+        stdout_value = match.group(1).strip()
+        # Remove escaped newline characters (\n, \r, etc.) that appear as literal strings
+        # This handles cases where shell command output includes newlines
+        stdout_value = stdout_value.replace('\\n', '').replace('\\r', '').strip()
+        
+        # Remove surrounding quotes (single or double) if present
+        # CommandResult may wrap stdout value in quotes like: stdout='value' or stdout="value"
+        if stdout_value and len(stdout_value) >= 2:
+            if (stdout_value[0] == "'" and stdout_value[-1] == "'") or \
+               (stdout_value[0] == '"' and stdout_value[-1] == '"'):
+                stdout_value = stdout_value[1:-1].strip()
+        
+        return stdout_value if stdout_value else None
+    
+    return None
+
+
 class SessionAwareSandboxManager:
     """
     Wrapper for ToolManager that automatically manages sandbox creation and reuse per session.
@@ -393,7 +428,7 @@ async def _download_sandbox_file_to_local(session: Dict) -> Optional[str]:
     """
     Download the first file from sandbox's /home/user/uploaded folder to a local temp path.
     
-    Uses base64 encoding to transfer the file content from sandbox to local.
+    Uses the download_file_from_sandbox_to_local tool to transfer files reliably.
     
     Args:
         session: The session dictionary containing tool_manager and sandbox_id
@@ -432,8 +467,8 @@ async def _download_sandbox_file_to_local(session: Dict) -> Optional[str]:
             logger.warning(f"Failed to list sandbox files: {result_str}")
             return None
         
-        # Get the first file name
-        file_name = result_str.strip()
+        # Parse stdout from CommandResult string
+        file_name = _parse_command_result_stdout(result_str)
         if not file_name:
             logger.info("No files found in sandbox uploaded directory")
             return None
@@ -442,42 +477,35 @@ async def _download_sandbox_file_to_local(session: Dict) -> Optional[str]:
         
         sandbox_file_path = f"{sandbox_uploaded_dir}/{file_name}"
         
-        # Use base64 command to encode the file and capture output
-        base64_result = await tool_manager.execute_tool_call(
+        # Use download_file_from_sandbox_to_local tool to download the file
+        download_result = await tool_manager.execute_tool_call(
             server_name="tool-python",
-            tool_name="run_command",
+            tool_name="download_file_from_sandbox_to_local",
             arguments={
                 "sandbox_id": sandbox_id,
-                "command": f"base64 -w 0 '{sandbox_file_path}'"
+                "sandbox_file_path": sandbox_file_path,
+                "local_filename": file_name
             }
         )
         
-        if "result" not in base64_result:
-            logger.warning(f"Unexpected base64 result: {base64_result}")
+        if "result" not in download_result:
+            logger.warning(f"Unexpected download result: {download_result}")
             return None
         
-        base64_str = base64_result["result"]
-        if "[ERROR]" in base64_str:
-            logger.warning(f"Failed to encode file as base64: {base64_str}")
+        result_str = download_result["result"]
+        if "[ERROR]" in result_str:
+            logger.warning(f"Failed to download file: {result_str}")
             return None
         
-        # Decode base64 and save to local temp file
-        import base64 as b64
-        try:
-            file_content = b64.b64decode(base64_str.strip())
-        except Exception as e:
-            logger.error(f"Failed to decode base64 content: {e}")
+        # Parse the local file path from result
+        # Expected format: "File downloaded successfully to: /path/to/file"
+        if "File downloaded successfully to:" in result_str:
+            local_file_path = result_str.split("File downloaded successfully to:")[-1].strip()
+            logger.info(f"Successfully downloaded {file_name} to {local_file_path}")
+            return local_file_path
+        else:
+            logger.warning(f"Unexpected download result format: {result_str}")
             return None
-        
-        # Create a temp directory and save the file with its original name
-        temp_dir = tempfile.mkdtemp(prefix=f"miroflow_session_{sandbox_id[:8]}_")
-        local_file_path = os.path.join(temp_dir, file_name)
-        
-        with open(local_file_path, "wb") as f:
-            f.write(file_content)
-        
-        logger.info(f"Successfully downloaded {file_name} to {local_file_path} (size: {len(file_content)} bytes)")
-        return local_file_path
             
     except Exception as e:
         logger.error(f"Error downloading sandbox file: {e}", exc_info=True)
