@@ -389,6 +389,125 @@ def initialize_config(overrides: Optional[List[str]] = None):
     return _cfg
 
 
+async def _download_sandbox_file_to_local(session: Dict) -> Optional[str]:
+    """
+    Download the first file from sandbox's /home/user/uploaded folder to a local temp path.
+    
+    Uses base64 encoding to transfer the file content from sandbox to local.
+    
+    Args:
+        session: The session dictionary containing tool_manager and sandbox_id
+        
+    Returns:
+        Local file path if a file was downloaded, None otherwise.
+        The caller is responsible for cleaning up the temp file after use.
+    """
+    tool_manager = session["main_agent_tool_manager"]
+    sandbox_id = session.get("sandbox_id")
+    
+    # If no sandbox exists yet, no files to download
+    if not sandbox_id:
+        logger.info("No sandbox exists for this session, skipping file download")
+        return None
+    
+    sandbox_uploaded_dir = "/home/user/uploaded"
+    
+    try:
+        # List files in the sandbox's uploaded directory (get only the first one)
+        list_result = await tool_manager.execute_tool_call(
+            server_name="tool-python",
+            tool_name="run_command",
+            arguments={
+                "sandbox_id": sandbox_id,
+                "command": f"ls -1 {sandbox_uploaded_dir} 2>/dev/null | head -1"
+            }
+        )
+        
+        if "result" not in list_result:
+            logger.warning(f"Unexpected list result: {list_result}")
+            return None
+        
+        result_str = list_result["result"]
+        if "[ERROR]" in result_str:
+            logger.warning(f"Failed to list sandbox files: {result_str}")
+            return None
+        
+        # Get the first file name
+        file_name = result_str.strip()
+        if not file_name:
+            logger.info("No files found in sandbox uploaded directory")
+            return None
+        
+        logger.info(f"Found file in sandbox: {file_name}")
+        
+        sandbox_file_path = f"{sandbox_uploaded_dir}/{file_name}"
+        
+        # Use base64 command to encode the file and capture output
+        base64_result = await tool_manager.execute_tool_call(
+            server_name="tool-python",
+            tool_name="run_command",
+            arguments={
+                "sandbox_id": sandbox_id,
+                "command": f"base64 -w 0 '{sandbox_file_path}'"
+            }
+        )
+        
+        if "result" not in base64_result:
+            logger.warning(f"Unexpected base64 result: {base64_result}")
+            return None
+        
+        base64_str = base64_result["result"]
+        if "[ERROR]" in base64_str:
+            logger.warning(f"Failed to encode file as base64: {base64_str}")
+            return None
+        
+        # Decode base64 and save to local temp file
+        import base64 as b64
+        try:
+            file_content = b64.b64decode(base64_str.strip())
+        except Exception as e:
+            logger.error(f"Failed to decode base64 content: {e}")
+            return None
+        
+        # Create a temp directory and save the file with its original name
+        temp_dir = tempfile.mkdtemp(prefix=f"miroflow_session_{sandbox_id[:8]}_")
+        local_file_path = os.path.join(temp_dir, file_name)
+        
+        with open(local_file_path, "wb") as f:
+            f.write(file_content)
+        
+        logger.info(f"Successfully downloaded {file_name} to {local_file_path} (size: {len(file_content)} bytes)")
+        return local_file_path
+            
+    except Exception as e:
+        logger.error(f"Error downloading sandbox file: {e}", exc_info=True)
+        return None
+
+
+def _cleanup_temp_file(file_path: Optional[str]) -> None:
+    """
+    Clean up a temporary file and its parent directory.
+    
+    Args:
+        file_path: Path to the temp file to clean up
+    """
+    if not file_path:
+        return
+    
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Cleaned up temp file: {file_path}")
+        
+        # Also remove the temp directory if it's empty
+        temp_dir = os.path.dirname(file_path)
+        if temp_dir and os.path.exists(temp_dir) and not os.listdir(temp_dir):
+            os.rmdir(temp_dir)
+            logger.info(f"Cleaned up temp directory: {temp_dir}")
+    except Exception as e:
+        logger.warning(f"Failed to clean up temp file {file_path}: {e}")
+
+
 async def stream_generator(
     messages: List[ExecuteMessage],
     session_id: str,
@@ -438,7 +557,11 @@ async def stream_generator(
     # Prepare task parameters
     task_id = f"api_{session_id}"
     task_description = query
-    task_file_name = ""
+    
+    # Download file from sandbox /home/user/uploaded folder to local temp path
+    task_file_name = await _download_sandbox_file_to_local(session)
+    if task_file_name:
+        logger.info(f"Downloaded file from sandbox for session {session_id}: {task_file_name}")
     
     async def consume_stream():
         """Consume stream events and transform them"""
@@ -538,6 +661,8 @@ async def stream_generator(
         except Exception as e:
             logger.error(f"Error in pipeline execution: {e}", exc_info=True)
         finally:
+            # Clean up temp file after pipeline execution
+            _cleanup_temp_file(task_file_name)
             # Signal end of stream
             await stream_queue.put(None)
     
