@@ -646,7 +646,7 @@ async def upload(
     
     Returns:
         JSON response with the file path in the sandbox
-        Example: {"data": {"path": "/home/user/example.txt", "sandbox_id": "abc123"}}
+        Example: {"data": {"path": "/home/user/uploaded/example.txt", "sandbox_id": "abc123"}}
     
     Note:
         - Each X-Session-Id corresponds to a session with a sandbox
@@ -688,7 +688,7 @@ async def upload(
         
         async def upload_to_sandbox(local_path: str):
             """Upload file to the session's sandbox (sandbox_id auto-injected)."""
-            sandbox_file_path = f"/home/user/{safe_filename}"
+            sandbox_file_path = f"/home/user/uploaded/{safe_filename}"
             logger.info(f"Uploading {local_path} to session sandbox at {sandbox_file_path}")
             
             # Note: sandbox_id will be automatically injected by SessionAwareSandboxManager
@@ -698,7 +698,7 @@ async def upload(
                 arguments={
                     # sandbox_id is auto-injected, no need to pass it explicitly
                     "local_file_path": local_path,
-                    "sandbox_file_path": "/home/user"
+                    "sandbox_file_path": "/home/user/uploaded"
                 }
             )
             if "result" in upload_result:
@@ -718,7 +718,7 @@ async def upload(
                         tool_name="run_command",
                         arguments={
                             # sandbox_id is auto-injected
-                            "command": f"mv /home/user/{uploaded_temp_name} /home/user/{safe_filename}"
+                            "command": f"mv /home/user/uploaded/{uploaded_temp_name} /home/user/uploaded/{safe_filename}"
                         }
                     )
                     if "result" in rename_result:
