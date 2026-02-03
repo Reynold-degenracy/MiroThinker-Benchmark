@@ -399,7 +399,7 @@ class OpenAIClient(BaseClient):
         # Create a copy for sending to LLM (to avoid modifying the original)
         messages_for_llm = [m.copy() for m in messages_history]
 
-        img_marker_pattern = re.compile(r'<miro_image_data>(.*?)</miro_image_data>', re.DoTALL)
+        img_marker_pattern = re.compile(r'<miro_image_data>(.*?)</miro_image_data>', re.DOTALL)
         for msg in messages_for_llm:
             if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                 content_str = msg["content"]
