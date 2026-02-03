@@ -441,7 +441,8 @@ def process_input(task_description, task_file_name):
                 
                 # Format as Markdown with base64 data
                 file_content_section += f"\n\n## Image Content\nFile: {task_file_name}\n\n"
-                file_content_section += f"![{task_file_name}](data:{mime_type};base64,{image_data})\n\n"
+                file_content_section += f"\n<miro_image_data>data:{mime_type};base64,{image_data}</miro_image_data>\n\n"
+                # file_content_section += f"![{task_file_name}](data:{mime_type};base64,{image_data})\n\n"
 
             elif file_extension == "py":
                 # Python files - read directly

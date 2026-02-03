@@ -6,7 +6,7 @@ import dataclasses
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
-
+import re 
 import tiktoken
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, DefaultHttpxClient, OpenAI
 
@@ -398,6 +398,29 @@ class OpenAIClient(BaseClient):
         """
         # Create a copy for sending to LLM (to avoid modifying the original)
         messages_for_llm = [m.copy() for m in messages_history]
+
+        img_marker_pattern = re.compile(r'<miro_image_data>(.*?)</miro_image_data>', re.DoTALL)
+        for msg in messages_for_llm:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                content_str = msg["content"]
+                if "<miro_image_data>" in content_str:
+                    new_content = [] 
+                    last_pos = 0 
+                    for match in img_marker_pattern.finditer(content_str):
+                        pre_text = content_str[last_pos:match.start()]
+                        if pre_text:
+                            new_content.append({"type": "text", "text": pre_text})
+                        
+                        image_url = match.group(1)
+                        new_content.append({"type": "image_url", "image_url":{
+                            "url": f"data:image/png;base64,{image_url}",
+                            "detail": "high" # GAIA 图片细节通常很重要，必须开 High
+                        }})
+                        last_pos = match.end()
+                    post_text = content_str[last_pos:].strip()
+                    if post_text:
+                        new_content.append({"type": "text", "text": post_text})
+                    msg["content"] = new_content
 
         # put the system prompt in the first message since OpenAI API does not support system prompt in
         if system_prompt:
