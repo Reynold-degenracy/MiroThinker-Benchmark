@@ -593,14 +593,116 @@ async def stream_generator(
     
     async def consume_stream():
         """Consume stream events and transform them"""
+
+        def _make_answer(delta_text: str) -> bytes:
+            """Helper to build an NDJSON answer line."""
+            return (json.dumps({"type": "answer", "step": step_value, "delta": delta_text}, ensure_ascii=False) + "\n").encode('utf-8')
+
         try:
             # Emit start event immediately
             start_event = json.dumps({"type": "start", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
             logger.info(f"[Stream Output] Sending START event immediately")
             yield start_event.encode('utf-8')
+
             current_agent_name = None
             should_process_messages = True
-            
+
+            # --- MCP tool-call tag filtering state ---
+            # inside_mcp_tool: True while we are between <use_mcp_tool> and </use_mcp_tool>
+            inside_mcp_tool = False
+            OPEN_TAG = "<use_mcp_tool>"
+            CLOSE_TAG = "</use_mcp_tool>"
+            # Sliding window of up to WINDOW_SIZE deltas for detecting tags
+            # that may be split across many deltas by different tokenizers.
+            # When the buffer exceeds WINDOW_SIZE, the oldest delta is flushed
+            # to maintain true streaming output with bounded latency.
+            WINDOW_SIZE = 10
+            delta_buffer = []
+            skip_prefix = 0
+
+            def _flush_oldest_delta():
+                """Flush the oldest delta from the buffer with tag filtering.
+
+                Removes the oldest delta from delta_buffer, updates
+                inside_mcp_tool, and returns the visible (non-muted) text."""
+                nonlocal inside_mcp_tool, skip_prefix
+                window = "".join(delta_buffer)
+                first_len = len(delta_buffer[0])
+                local_skip = skip_prefix
+                new_skip_prefix = skip_prefix
+
+                # Scan entire window for open/close tags, collecting visible
+                # chars that fall within [0, first_len) – the oldest delta.
+                visible_parts = []
+                inside_scan = inside_mcp_tool
+                scan_pos = 0
+
+                while scan_pos < len(window):
+                    if not inside_scan:
+                        idx = window.find(OPEN_TAG, scan_pos)
+                        if idx == -1:
+                            # No open tag in rest of window
+                            if scan_pos < first_len:
+                                span_start = max(scan_pos, local_skip)
+                                if span_start < first_len:
+                                    visible_parts.append(
+                                        window[span_start:first_len]
+                                    )
+                            break
+                        else:
+                            if scan_pos < first_len and idx > scan_pos:
+                                span_start = max(scan_pos, local_skip)
+                                span_end = min(idx, first_len)
+                                if span_end > span_start:
+                                    visible_parts.append(
+                                        window[span_start:span_end]
+                                    )
+                            if idx < first_len:
+                                if idx >= local_skip:
+                                    visible_parts.append(OPEN_TAG)
+                                new_skip_prefix = max(
+                                    new_skip_prefix, idx + len(OPEN_TAG)
+                                )
+                            inside_scan = True
+                            scan_pos = idx + len(OPEN_TAG)
+                    else:
+                        idx = window.find(CLOSE_TAG, scan_pos)
+                        if idx == -1:
+                            # Still inside mcp tool – skip rest
+                            break
+                        else:
+                            if idx < first_len:
+                                if idx >= local_skip:
+                                    visible_parts.append(CLOSE_TAG)
+                                new_skip_prefix = max(
+                                    new_skip_prefix, idx + len(CLOSE_TAG)
+                                )
+                            inside_scan = False
+                            scan_pos = idx + len(CLOSE_TAG)
+
+                # Compute inside_mcp_tool state at the first_len boundary
+                # so subsequent flushes start with the correct state.
+                state = inside_mcp_tool
+                s = 0
+                while s < first_len:
+                    if not state:
+                        idx = window.find(OPEN_TAG, s)
+                        if idx == -1 or idx >= first_len:
+                            break
+                        state = True
+                        s = idx + len(OPEN_TAG)
+                    else:
+                        idx = window.find(CLOSE_TAG, s)
+                        if idx == -1 or idx >= first_len:
+                            break
+                        state = False
+                        s = idx + len(CLOSE_TAG)
+                inside_mcp_tool = state
+
+                delta_buffer.pop(0)
+                skip_prefix = max(new_skip_prefix - first_len, 0)
+                return "".join(visible_parts)
+
             while True:
                 event = await stream_queue.get()
                 if event is None:  # End of stream signal
@@ -608,66 +710,67 @@ async def stream_generator(
 
                 event_type = event.get("event")
                 data = event.get("data", {})
-                
+
                 # Track current agent to skip Final Summary messages
                 if event_type == "start_of_agent":
                     current_agent_name = data.get("agent_name", "")
-                    # Skip message streaming for "Final Summary" agent
-                    # This agent is only used to generate the final boxed answer,
-                    # and it duplicates the content already streamed by main agent
                     should_process_messages = (current_agent_name != "Final Summary")
                     logger.debug(f"[Agent] Started: {current_agent_name}, process_messages={should_process_messages}")
-                
+
                 elif event_type == "end_of_agent":
                     agent_name = data.get("agent_name", "")
                     logger.debug(f"[Agent] Ended: {agent_name}")
-                
+
+                if event_type == "start_of_llm":
+                    # New LLM turn – flush remaining buffered deltas and reset
+                    while delta_buffer:
+                        visible = _flush_oldest_delta()
+                        if visible:
+                            yield _make_answer(visible)
+                    inside_mcp_tool = False
+                    skip_prefix = 0
+
                 if event_type == "tool_call":
                     tool_name = data.get("tool_name", "")
                     tool_input = data.get("tool_input", data.get("delta_input", {}))
                     if tool_name == "show_error":
                         error_text = tool_input.get("error", "")
                         if error_text:
-                            output = {
-                                "type": "answer",
-                                "step": step_value,
-                                "delta": f"Error: {error_text}"
-                            }
-                            output_str = json.dumps(output, ensure_ascii=False) + "\n"
-                            logger.info(f"[Stream Output] Sending ERROR event")
-                            yield output_str.encode('utf-8')
-                
+                            logger.info("[Stream Output] Sending ERROR event")
+                            yield _make_answer(f"Error: {error_text}")
+
                 elif event_type == "message":
-                    # Only stream messages from agents that are not "Final Summary"
-                    # Final Summary regenerates the answer for extraction purposes,
-                    # but we don't want to show it to users (causes duplication)
-                    if should_process_messages:
-                        delta_content = data.get("delta", {}).get("content", "")
-                        if delta_content:
-                            output = {
-                                "type": "answer",
-                                "step": step_value,
-                                "delta": delta_content
-                            }
-                            output_str = json.dumps(output, ensure_ascii=False) + "\n"
-                            yield output_str.encode('utf-8')
-                    else:
-                        pass
-                
+                    if not should_process_messages:
+                        continue
+
+                    delta_content = data.get("delta", {}).get("content", "")
+                    if not delta_content:
+                        continue
+
+                    # ---- 10-delta sliding window tag detection ----
+                    # Buffer the incoming delta.  When the buffer exceeds
+                    # WINDOW_SIZE, flush the oldest delta so we maintain
+                    # true streaming output with bounded latency.
+                    delta_buffer.append(delta_content)
+
+                    while len(delta_buffer) > WINDOW_SIZE:
+                        visible = _flush_oldest_delta()
+                        if visible:
+                            yield _make_answer(visible)
+
                 elif event_type == "end_of_workflow":
-                    # Workflow end - signal completion
                     break
-                
+
         except Exception as e:
             logger.error(f"Error in stream consumer: {e}", exc_info=True)
-            error_output = {
-                "type": "answer",
-                "step": step_value,
-                "delta": f"Error: {str(e)}"
-            }
-            logger.info(f"[Stream Output] Sending ERROR event due to exception")
-            yield (json.dumps(error_output, ensure_ascii=False) + "\n").encode('utf-8')
+            logger.info("[Stream Output] Sending ERROR event due to exception")
+            yield _make_answer(f"Error: {str(e)}")
         finally:
+            # Flush all remaining buffered deltas
+            while delta_buffer:
+                visible = _flush_oldest_delta()
+                if visible:
+                    yield _make_answer(visible)
             end_event = json.dumps({"type": "end", "step": step_value, "delta": ""}, ensure_ascii=False) + "\n"
             logger.info(f"[Stream Output] Sending END event")
             yield end_event.encode('utf-8')
