@@ -1,0 +1,14 @@
+# gemini-2.5-flash.yaml - Gemini 2.5 Flash LLM configuration
+provider: "openai" # openai, anthropic, qwen, google - OpenRouter uses OpenAI-compatible API
+model_name: "google/gemini-3-pro-preview"
+async_client: true  # Enable async client for proper streaming support
+temperature: 0.3
+top_p: 1.0
+min_p: 0.0
+top_k: -1
+max_tokens: 8192
+api_key: ${oc.env:OPENAI_API_KEY}
+base_url: https://openrouter.ai/api/v1
+max_context_length: 1048576
+keep_tool_result: -1
+repetition_penalty: 1.05

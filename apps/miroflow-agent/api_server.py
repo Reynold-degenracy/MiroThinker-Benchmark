@@ -805,25 +805,25 @@ async def stream_generator(
         yield output
         # Note: Yielding bytes directly helps with immediate flushing
 
-@app.post("/v1/api/plan")
-async def plan(
-    request: ExecuteRequest,
-    x_session_id: str = Header(..., alias="X-Session-Id"),
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    content_type: str = Header(..., alias="Content-Type"),
-):
-    """Return the question from the request."""
-    _validate_json_content_type(content_type)
-    _validate_bearer_auth(authorization)
+# @app.post("/v1/api/plan")
+# async def plan(
+#     request: ExecuteRequest,
+#     x_session_id: str = Header(..., alias="X-Session-Id"),
+#     authorization: Optional[str] = Header(None, alias="Authorization"),
+#     content_type: str = Header(..., alias="Content-Type"),
+# ):
+#     """Return the question from the request."""
+#     _validate_json_content_type(content_type)
+#     _validate_bearer_auth(authorization)
     
-    if not request.message:
-        raise HTTPException(status_code=400, detail="message is required")
+#     if not request.message:
+#         raise HTTPException(status_code=400, detail="message is required")
     
-    primary_message = next((msg for msg in request.message if msg.type == "query"), request.message[0])
-    question = primary_message.content
+#     primary_message = next((msg for msg in request.message if msg.type == "query"), request.message[0])
+#     question = primary_message.content
     
-    logger.info(f"Plan endpoint hit for session {x_session_id}: {question}")
-    return {"question": question}
+#     logger.info(f"Plan endpoint hit for session {x_session_id}: {question}")
+#     return {"question": question}
 
 
 @app.post("/v1/api/execute")
@@ -886,7 +886,6 @@ async def health_check():
 
 
 @app.post("/v1/api/upload")
-@app.post("/upload")
 async def upload(
     file: UploadFile = File(...),
     x_session_id: str = Header(..., alias="X-Session-Id"),
@@ -909,7 +908,7 @@ async def upload(
         - Files are uploaded directly to the E2B sandbox, not the API server
         - Sandbox lifecycle is 3600 seconds (default TTL)
         - The server is stateless and does not maintain conversation history
-        - Endpoint available at /v1/api/upload and /upload
+        - Endpoint available at /v1/api/upload
     """
     try:
         _validate_bearer_auth(authorization)

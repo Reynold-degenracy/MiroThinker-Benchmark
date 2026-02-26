@@ -8,6 +8,7 @@ PORT="7210"
 BASE_URL="http://${HOST}:${PORT}"
 SESSION_ID="sess_$(date +%s)"
 AUTH_TOKEN="Bearer test_token_xyz"
+IMAGE_FILE="/home/shinonome/MiroThinker/apps/miroflow-agent/test.png"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -35,32 +36,10 @@ fi
 echo ""
 
 # # Test 2: Execute query (streaming response)
-# echo -e "${YELLOW}Test 2: Execute Query (Streaming Response)${NC}"
-# echo "POST ${BASE_URL}/v1/api/execute"
-# echo "Session ID: $SESSION_ID"
-# echo "Authorization: $AUTH_TOKEN"
-# echo ""
-# curl -N "${BASE_URL}/v1/api/execute" \
-#   -H "Content-Type: application/json" \
-#   -H "X-Session-Id: $SESSION_ID" \
-#   -H "Authorization: $AUTH_TOKEN" \
-#   -d '{
-#     "message": [
-#       {
-#         "type": "query",
-#         "step": 1,
-#         "content": "What is 2 + 2?"
-#       }
-#     ]
-#   }' 2>&1
-
-# echo ""
-# echo ""
-
-# Test 3: Execute another query with different content
-echo -e "${YELLOW}Test 3: Execute Another Query${NC}"
+echo -e "${YELLOW}Test 2: Execute Query (Streaming Response)${NC}"
 echo "POST ${BASE_URL}/v1/api/execute"
 echo "Session ID: $SESSION_ID"
+echo "Authorization: $AUTH_TOKEN"
 echo ""
 curl -N "${BASE_URL}/v1/api/execute" \
   -H "Content-Type: application/json" \
@@ -71,7 +50,41 @@ curl -N "${BASE_URL}/v1/api/execute" \
       {
         "type": "query",
         "step": 1,
-        "content": "Find the Latest tweet of Elon Musk."
+        "content": "What is the latest tweet of Elon Musk?"
+      }
+    ]
+  }' 2>&1
+
+echo ""
+echo ""
+
+# Test 3: Upload file then execute query
+echo -e "${YELLOW}Test 3: Upload File Then Execute Query${NC}"
+echo "POST ${BASE_URL}/v1/api/upload"
+echo "Session ID: $SESSION_ID"
+echo "File: $IMAGE_FILE"
+echo ""
+
+curl -s "${BASE_URL}/v1/api/upload" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Authorization: $AUTH_TOKEN" \
+  -F "file=@${IMAGE_FILE}" 2>&1
+
+echo ""
+echo "POST ${BASE_URL}/v1/api/execute"
+echo "Session ID: $SESSION_ID"
+echo ""
+
+curl -N "${BASE_URL}/v1/api/execute" \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Authorization: $AUTH_TOKEN" \
+  -d '{
+    "message": [
+      {
+        "type": "query",
+        "step": 1,
+        "content": "describe the uploaded image."
       }
     ]
   }' 2>&1 | python3 -u -c 'import json,sys
