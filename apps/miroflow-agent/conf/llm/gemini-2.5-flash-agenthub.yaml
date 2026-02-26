@@ -1,0 +1,10 @@
+# gemini-2.5-flash-agenthub.yaml - Gemini 2.5 Flash via AgentHub
+defaults:
+  - default
+  - _self_
+
+provider: "gemini"
+model_name: "gemini-2.5-flash-preview-04-17"
+api_key: ${oc.env:GEMINI_API_KEY}
+base_url: null
+max_context_length: 1048576

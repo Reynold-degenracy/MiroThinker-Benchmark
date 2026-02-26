@@ -1,0 +1,10 @@
+# glm-4.yaml - GLM-4 via AgentHub
+defaults:
+  - default
+  - _self_
+
+provider: "glm"
+model_name: "glm-4"
+api_key: ${oc.env:GLM_API_KEY}
+base_url: null
+max_context_length: 128000
