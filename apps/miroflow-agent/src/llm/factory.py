@@ -6,6 +6,7 @@ from typing import Optional
 from omegaconf import DictConfig, OmegaConf
 
 from ..logging.task_logger import TaskLog
+from .providers.agenthub_client import AgentHubClient
 from .providers.anthropic_client import AnthropicClient
 from .providers.openai_client import OpenAIClient
 
@@ -25,6 +26,16 @@ def ClientFactory(
         ),
         "qwen": lambda: OpenAIClient(task_id=task_id, task_log=task_log, cfg=config),
         "openai": lambda: OpenAIClient(task_id=task_id, task_log=task_log, cfg=config),
+        # AgentHub-routed providers (use agenthub AutoLLMClient)
+        "agenthub": lambda: AgentHubClient(
+            task_id=task_id, task_log=task_log, cfg=config
+        ),
+        # "gemini": lambda: AgentHubClient(
+        #     task_id=task_id, task_log=task_log, cfg=config
+        # ),
+        # "glm": lambda: AgentHubClient(
+        #     task_id=task_id, task_log=task_log, cfg=config
+        # ),
     }
 
     factory = client_creators.get(provider)

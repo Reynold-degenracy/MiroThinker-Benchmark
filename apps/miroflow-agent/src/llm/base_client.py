@@ -198,6 +198,10 @@ class BaseClient(ABC):
         """
         # Unified LLM call processing
         try:
+            # Expose call context for provider implementations that need
+            # turn/agent metadata (e.g. stateful tracing identifiers).
+            self._current_step_id = step_id
+            self._current_agent_type = agent_type
             response, message_history = await self._create_message(
                 system_prompt,
                 message_history,
