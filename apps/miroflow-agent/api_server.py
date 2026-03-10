@@ -2,7 +2,6 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ logger = bootstrap_logger()
 _cfg: Optional[DictConfig] = None
 _default_cfg: Optional[DictConfig] = None  # Store CLI-provided default config
 _sessions: Dict[str, Dict] = {}
+_sessions_lock = asyncio.Lock()
 
 
 def _parse_command_result_stdout(result_str: str) -> Optional[str]:
@@ -83,7 +83,16 @@ class SessionAwareSandboxManager:
         """
         self.tool_manager = tool_manager
         self.session_dict = session_dict
-        self._sandbox_creation_lock = asyncio.Lock()
+        shared_lock = self.session_dict.get("sandbox_creation_lock")
+        if shared_lock is None:
+            shared_lock = asyncio.Lock()
+            self.session_dict["sandbox_creation_lock"] = shared_lock
+        self._sandbox_creation_lock = shared_lock
+        self._sandbox_tools = {
+            "run_command",
+            "run_python_code",
+            "upload_file_from_local_to_sandbox",
+        }
     
     async def _ensure_sandbox_exists(self) -> str:
         """
@@ -131,22 +140,15 @@ class SessionAwareSandboxManager:
         Returns:
             True if this tool needs sandbox_id and doesn't have a valid one
         """
-        # Tools that require sandbox_id
-        sandbox_tools = {
-            "run_command",
-            "run_python_code", 
-            "run_python_code_stream",
-            "upload_file_from_local_to_sandbox",
-            "download_file_from_sandbox_to_local",
-            "download_file_from_internet_to_sandbox"
-        }
-        
-        if tool_name not in sandbox_tools:
+        if tool_name not in self._sandbox_tools:
             return False
         
         # Check if sandbox_id is missing or invalid
         sandbox_id = arguments.get("sandbox_id")
         if not sandbox_id:
+            return True
+        sandbox_id_normalized = str(sandbox_id).strip().lower()
+        if not sandbox_id_normalized:
             return True
         
         # Invalid sandbox IDs that should be replaced (from python_mcp_server.py)
@@ -159,7 +161,7 @@ class SessionAwareSandboxManager:
         }
         
         # If the provided sandbox_id is invalid, we need to inject the real one
-        if sandbox_id in INVALID_SANDBOX_IDS:
+        if sandbox_id_normalized in INVALID_SANDBOX_IDS:
             logger.warning(f"Invalid sandbox_id '{sandbox_id}' detected, will replace with session sandbox")
             return True
         
@@ -177,6 +179,21 @@ class SessionAwareSandboxManager:
         Returns:
             The result of the tool call
         """
+        # Restrict tool-python capabilities exposed to agents.
+        if server_name == "tool-python" and tool_name not in self._sandbox_tools:
+            allowed_tools = ", ".join(sorted(self._sandbox_tools))
+            logger.warning(
+                f"Blocked disallowed tool-python tool '{tool_name}'. Allowed tools: {allowed_tools}"
+            )
+            return {
+                "server_name": server_name,
+                "tool_name": tool_name,
+                "error": (
+                    f"Tool '{tool_name}' is disabled. "
+                    f"Allowed tool-python tools: {allowed_tools}"
+                ),
+            }
+
         # If this is a Python tool that needs a sandbox_id, inject it
         if server_name == "tool-python" and self._needs_sandbox_id(tool_name, arguments):
             try:
@@ -198,11 +215,12 @@ class SessionAwareSandboxManager:
         # If sandbox-related tool call failed due to sandbox unavailability, recreate and retry once
         if (
             server_name == "tool-python"
-            and self._needs_sandbox_id(tool_name, arguments)
+            and tool_name in self._sandbox_tools
             and self._is_sandbox_error(result)
         ):
             # Capture the sandbox_id before acquiring the lock to detect concurrent updates
             sandbox_id = self.session_dict.get("sandbox_id")
+            should_recreate = False
             
             # Protect sandbox reset/creation with the sandbox creation lock to avoid races
             async with self._sandbox_creation_lock:
@@ -225,8 +243,10 @@ class SessionAwareSandboxManager:
                 
                 # Clear the cached sandbox_id so a fresh one is created
                 self.session_dict["sandbox_id"] = None
+                should_recreate = True
                 
-                # Retry with new sandbox
+            # Retry with new sandbox outside the lock to avoid nested lock deadlocks.
+            if should_recreate:
                 try:
                     new_sandbox_id = await self._ensure_sandbox_exists()
                     arguments = {**arguments, "sandbox_id": new_sandbox_id}
@@ -295,19 +315,29 @@ def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
         create_pipeline_components(cfg)
     )
     
-    # Automatically blacklist create_sandbox tool since SessionAwareSandboxManager
-    # handles sandbox creation automatically. This prevents the LLM from directly
-    # calling create_sandbox and overwriting the session's sandbox.
-    main_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
-    logger.info("Auto-blacklisted 'create_sandbox' tool - sandbox management is automatic")
+    # Expose only a minimal Python tool subset to agents.
+    blocked_python_tools = {
+        "create_sandbox",
+        "run_python_code_stream",
+        "download_file_from_sandbox_to_local",
+        "download_file_from_internet_to_sandbox",
+    }
+    for tool_name in blocked_python_tools:
+        main_agent_tool_manager.tool_blacklist.add(("tool-python", tool_name))
+    logger.info(
+        "Applied tool-python blacklist to keep only run_command, run_python_code, "
+        "upload_file_from_local_to_sandbox available to agents"
+    )
     
     for sub_agent_tool_manager in sub_agent_tool_managers.values():
-        sub_agent_tool_manager.tool_blacklist.add(("tool-python", "create_sandbox"))
+        for tool_name in blocked_python_tools:
+            sub_agent_tool_manager.tool_blacklist.add(("tool-python", tool_name))
     
     # Create session dict
     session_dict = {
         "cfg": cfg,
         "sandbox_id": None,  # Will be created on first use
+        "sandbox_creation_lock": asyncio.Lock(),
         "output_formatter": output_formatter,
     }
     
@@ -326,6 +356,42 @@ def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
     session_dict["sub_agent_tool_managers"] = wrapped_sub_agents
     
     return session_dict
+
+
+async def _get_or_create_session(
+    session_id: str,
+    config_overrides: Optional[Dict[str, str]] = None,
+) -> Dict:
+    """
+    Get an existing session or create one atomically.
+
+    Notes:
+    - A single session_id always maps to exactly one session/sandbox.
+    - config_overrides only apply when creating a new session.
+    """
+    override_list = None
+    if config_overrides:
+        override_list = [f"{key}={value}" for key, value in config_overrides.items()]
+
+    async with _sessions_lock:
+        session = _sessions.get(session_id)
+        if session is not None:
+            if config_overrides:
+                logger.warning(
+                    f"Ignoring config_overrides for existing session {session_id} to keep a single sandbox per session."
+                )
+            return session
+
+        cfg = initialize_config(overrides=override_list)
+        session = _create_session_with_wrapped_managers(cfg)
+        _sessions[session_id] = session
+
+    if override_list:
+        logger.info(f"Created session {session_id} with config overrides: {override_list}")
+    else:
+        logger.info(f"Created session {session_id} with default config")
+
+    return session
 
 
 @asynccontextmanager
@@ -438,6 +504,10 @@ async def _download_sandbox_file_to_local(session: Dict) -> Optional[str]:
         The caller is responsible for cleaning up the temp file after use.
     """
     tool_manager = session["main_agent_tool_manager"]
+    # Internal post-processing path can use the underlying manager directly.
+    # This avoids agent-facing tool restrictions while keeping output file download working.
+    if isinstance(tool_manager, SessionAwareSandboxManager):
+        tool_manager = tool_manager.tool_manager
     sandbox_id = session.get("sandbox_id")
     
     # If no sandbox exists yet, no files to download
@@ -557,29 +627,12 @@ async def stream_generator(
     query = primary_message.content
     # Create async queue for receiving streaming updates
     stream_queue = asyncio.Queue()
-    
-    # Convert config_overrides dict to Hydra override list format
-    override_list = None
-    if config_overrides:
-        override_list = [f"{key}={value}" for key, value in config_overrides.items()]
-        logger.info(f"Config overrides for session {session_id}: {override_list}")
-    
-    # Get or create pipeline components for this session
-    # Note: If config overrides are provided, we create new components even if session exists
-    session_key = session_id
-    if config_overrides:
-        # Create a unique session key that includes config overrides
-        # This ensures different configs create different sessions
-        # Use deterministic hash for consistent session keys across restarts
-        config_str = json.dumps(config_overrides, sort_keys=True)
-        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
-        session_key = f"{session_id}_{config_hash}"
-    
-    if session_key not in _sessions:
-        cfg = initialize_config(overrides=override_list)
-        _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
-    
-    session = _sessions[session_key]
+
+    # Get or create pipeline components for this session atomically.
+    session = await _get_or_create_session(
+        session_id=session_id,
+        config_overrides=config_overrides,
+    )
     cfg = session["cfg"]
     
     # Prepare task parameters
@@ -927,15 +980,9 @@ async def upload(
             )
         
         logger.info(f"Received file upload request for session {x_session_id}: {safe_filename}")
-        
-        # Get or create session
-        session_key = x_session_id
-        if session_key not in _sessions:
-            # Initialize session with default config
-            cfg = initialize_config()
-            _sessions[session_key] = _create_session_with_wrapped_managers(cfg)
-        
-        session = _sessions[session_key]
+
+        # Get or create session atomically.
+        session = await _get_or_create_session(session_id=x_session_id)
         tool_manager = session["main_agent_tool_manager"]
         
         # The SessionAwareSandboxManager will automatically create and inject sandbox_id

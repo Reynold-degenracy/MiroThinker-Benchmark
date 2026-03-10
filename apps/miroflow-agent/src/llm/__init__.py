@@ -4,11 +4,13 @@
 from .base_client import BaseClient
 from .factory import ClientFactory
 from .providers import (
+    AgentHubClient,
     AnthropicClient,
     OpenAIClient,
 )
 
 __all__ = [
+    "AgentHubClient",
     "BaseClient",
     "ClientFactory",
     "AnthropicClient",

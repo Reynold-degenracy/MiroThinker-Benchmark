@@ -1,0 +1,9 @@
+defaults:
+  - default
+  - _self_
+
+provider: "agenthub"
+model_name: "openai/gpt-5.2"
+temperature: 1.0
+api_key: ${oc.env:OPENAI_API_KEY}
+base_url: ${oc.env:OPENAI_BASE_URL}
