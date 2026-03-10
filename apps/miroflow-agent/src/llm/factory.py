@@ -30,12 +30,12 @@ def ClientFactory(
         "agenthub": lambda: AgentHubClient(
             task_id=task_id, task_log=task_log, cfg=config
         ),
-        "gemini": lambda: AgentHubClient(
-            task_id=task_id, task_log=task_log, cfg=config
-        ),
-        "glm": lambda: AgentHubClient(
-            task_id=task_id, task_log=task_log, cfg=config
-        ),
+        # "gemini": lambda: AgentHubClient(
+        #     task_id=task_id, task_log=task_log, cfg=config
+        # ),
+        # "glm": lambda: AgentHubClient(
+        #     task_id=task_id, task_log=task_log, cfg=config
+        # ),
     }
 
     factory = client_creators.get(provider)

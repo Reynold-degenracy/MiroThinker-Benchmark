@@ -1,0 +1,10 @@
+# glm-4.7.yaml - GLM-4.7 via AgentHub
+defaults:
+  - default
+  - _self_
+
+provider: "agenthub"
+model_name: "z-ai/glm-4.7"
+api_key: ${oc.env:OPENAI_API_KEY}
+base_url: ${oc.env:OPENAI_BASE_URL}
+max_context_length: 128000

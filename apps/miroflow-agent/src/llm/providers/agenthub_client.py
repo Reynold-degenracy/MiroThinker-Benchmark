@@ -5,8 +5,10 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import tiktoken
@@ -170,6 +172,15 @@ class AgentHubClient(BaseClient):
             "prompt_tokens": 0,
             "completion_tokens": 0,
         }
+        # Keep separate stateful clients per conversation key.
+        self._stateful_clients: Dict[str, _AutoLLMClient] = {}
+        # Track attempts per (agent_type, turn) for trace_id generation.
+        self._trace_attempt_counters: Dict[Tuple[str, int], int] = {}
+        # Persist all AgentHub traces under task log directory.
+        base_log_dir = Path(getattr(self.task_log, "log_dir", "logs")).expanduser()
+        self._trace_root = (base_log_dir / "agenthub_traces").resolve()
+        self._trace_root.mkdir(parents=True, exist_ok=True)
+        os.environ["AGENTHUB_CACHE_DIR"] = str(self._trace_root)
 
     # ------------------------------------------------------------------
     # BaseClient interface
@@ -183,6 +194,114 @@ class AgentHubClient(BaseClient):
             base_url=self.base_url,
         )
 
+    def _conversation_key(self, agent_type: str) -> str:
+        """Build an isolated stateful conversation key."""
+        if agent_type == "main":
+            return f"{self.task_id}/main"
+        session_id = getattr(self.task_log, "current_sub_agent_session_id", None)
+        if session_id:
+            return f"{self.task_id}/{session_id}"
+        return f"{self.task_id}/{agent_type}"
+
+    def _get_stateful_client(self, agent_type: str) -> _AutoLLMClient:
+        """Get or create a stateful AutoLLMClient for current conversation."""
+        key = self._conversation_key(agent_type)
+        client = self._stateful_clients.get(key)
+        if client is None:
+            client = _AutoLLMClient(
+                model=self.model_name,
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
+            self._stateful_clients[key] = client
+        return client
+
+    def _sanitize_stateful_history(self, stateful_client: Any) -> None:
+        """Remove malformed reasoning items that break AgentHub GPT-5.2 replay.
+
+        OpenRouter may emit reasoning summary deltas without a signature field.
+        AgentHub GPT-5.2 expects every `thinking` item in history to include
+        `signature`, otherwise replay on the next turn raises KeyError('signature').
+        """
+        is_openrouter_gpt52 = (
+            "openrouter.ai" in (self.base_url or "").lower()
+            and "gpt-5.2" in (self.model_name or "").lower()
+        )
+        inner_client = getattr(stateful_client, "_client", None)
+        history = getattr(inner_client, "_history", None)
+        if not isinstance(history, list):
+            return
+
+        removed_items = 0
+        removed_messages = 0
+        new_history: List[Dict[str, Any]] = []
+
+        for message in history:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            # OpenRouter Responses API rejects assistant-role replay items in input.
+            if is_openrouter_gpt52 and role == "assistant":
+                removed_messages += 1
+                continue
+
+            content_items = message.get("content_items")
+            if not isinstance(content_items, list):
+                new_history.append(message)
+                continue
+
+            filtered_items: List[Dict[str, Any]] = []
+            for item in content_items:
+                if (
+                    isinstance(item, dict)
+                    and item.get("type") == "thinking"
+                    and not item.get("signature")
+                ):
+                    removed_items += 1
+                    continue
+                filtered_items.append(item)
+
+            if len(filtered_items) != len(content_items):
+                new_message = message.copy()
+                new_message["content_items"] = filtered_items
+                message = new_message
+
+            # If everything got filtered out, skip this message.
+            if not filtered_items:
+                removed_messages += 1
+                continue
+            new_history.append(message)
+
+        history[:] = new_history
+
+        if removed_items > 0 or removed_messages > 0:
+            self.task_log.log_step(
+                "warning",
+                "LLM | AgentHub History Sanitized",
+                (
+                    "Removed "
+                    f"{removed_items} malformed thinking item(s) and "
+                    f"{removed_messages} message(s) from stateful history."
+                ),
+            )
+
+    def _build_trace_id(self, agent_type: str, turn: int) -> str:
+        """Build per-call trace id in required format."""
+        counter_key = (agent_type, turn)
+        attempt = self._trace_attempt_counters.get(counter_key, 0) + 1
+        self._trace_attempt_counters[counter_key] = attempt
+        return f"{self.task_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
+
+    @staticmethod
+    def _get_latest_user_message(
+        messages_history: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the most recent user message."""
+        for msg in reversed(messages_history):
+            if msg.get("role") == "user":
+                return msg
+        return None
+
     def _update_token_usage(self, usage_data: Any) -> None:
         """Update cumulative token usage from a UniEvent usage_metadata dict."""
         if not usage_data:
@@ -191,9 +310,11 @@ class AgentHubClient(BaseClient):
             )
             return
 
-        prompt_tokens: int = usage_data.get("prompt_tokens") or 0
-        response_tokens: int = usage_data.get("response_tokens") or 0
-        cached_tokens: int = usage_data.get("cached_tokens") or 0
+        # usage_data may be a plain dict or a lightweight wrapper object.
+        get_value = usage_data.get if hasattr(usage_data, "get") else None
+        prompt_tokens: int = (get_value("prompt_tokens") if get_value else 0) or 0
+        response_tokens: int = (get_value("response_tokens") if get_value else 0) or 0
+        cached_tokens: int = (get_value("cached_tokens") if get_value else 0) or 0
 
         self.token_usage["total_input_tokens"] += prompt_tokens
         self.token_usage["total_output_tokens"] += response_tokens
@@ -230,18 +351,37 @@ class AgentHubClient(BaseClient):
             messages_history, keep_tool_result
         )
 
+        # For stateful API calls, only send the newest user message and let
+        # AgentHub maintain long-term conversation history internally.
+        latest_user_msg = self._get_latest_user_message(messages_for_llm)
+        if latest_user_msg is None:
+            raise ValueError(
+                "AgentHub stateful call requires at least one user message."
+            )
+        uni_messages = to_uni_messages([latest_user_msg])
+        if not uni_messages:
+            raise ValueError("Failed to convert latest user message to UniMessage.")
+
+        agent_type = str(getattr(self, "_current_agent_type", "main"))
+        turn = int(getattr(self, "_current_step_id", 1) or 1)
+
         # Convert to agenthub formats
         config = to_uni_config(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             system_prompt=system_prompt,
         )
-        uni_messages = to_uni_messages(messages_for_llm)
+        config["trace_id"] = self._build_trace_id(agent_type=agent_type, turn=turn)
+        stateful_client = self._get_stateful_client(agent_type)
+        # Ensure prior turns won't crash on GPT-5.2 replay due to malformed reasoning items.
+        self._sanitize_stateful_history(stateful_client)
 
         try:
             response = await self._consume_uni_stream(
-                uni_messages, config, stream_queue
+                stateful_client, uni_messages[0], config, stream_queue
             )
+            # AgentHub appends assistant message into stateful history after streaming.
+            self._sanitize_stateful_history(stateful_client)
             self._update_token_usage(response.usage)
             self.task_log.log_step(
                 "info",
@@ -273,7 +413,8 @@ class AgentHubClient(BaseClient):
 
     async def _consume_uni_stream(
         self,
-        uni_messages: List[UniMessage],
+        stateful_client: _AutoLLMClient,
+        uni_message: UniMessage,
         config: UniConfig,
         stream_queue: Optional[Any] = None,
     ) -> Any:
@@ -291,8 +432,14 @@ class AgentHubClient(BaseClient):
         usage_data: Optional[Dict[str, Any]] = None
         message_id = str(uuid.uuid4())
 
-        async for event in self.client.streaming_response(uni_messages, config):
+        async for event in stateful_client.streaming_response_stateful(
+            message=uni_message,
+            config=config,
+        ):
             event_type = event.get("event_type")
+            # Some agenthub backends emit usage_metadata in non-stop events.
+            if event.get("usage_metadata") is not None:
+                usage_data = event.get("usage_metadata")
 
             if event_type == "delta":
                 for item in event.get("content_items", []):
@@ -367,8 +514,6 @@ class AgentHubClient(BaseClient):
             elif event_type == "stop":
                 if event.get("finish_reason"):
                     finish_reason = event.get("finish_reason")
-                if event.get("usage_metadata"):
-                    usage_data = event.get("usage_metadata")
 
         # ------------------------------------------------------------------
         # Build an OpenAI-compatible MockResponse
@@ -405,6 +550,10 @@ class AgentHubClient(BaseClient):
 
             def get(self, key: str, default: Any = None) -> Any:
                 return self._data.get(key, default)
+
+            def __bool__(self) -> bool:
+                # Make empty usage behave like falsy so callers can detect missing usage.
+                return bool(self._data)
 
         class _MockResponse:
             def __init__(self, choices: List, usage: Any) -> None:
@@ -551,54 +700,20 @@ class AgentHubClient(BaseClient):
     def ensure_summary_context(
         self, message_history: list, summary_prompt: str
     ) -> Tuple[bool, list]:
-        """Check if adding summary_prompt would exceed context; roll back if so."""
-        last_prompt_tokens = self.last_call_tokens.get("prompt_tokens", 0)
-        last_completion_tokens = self.last_call_tokens.get("completion_tokens", 0)
-        buffer_factor = 1.5
-
-        summary_tokens = int(
-            self._estimate_tokens(str(summary_prompt)) * buffer_factor
-        )
-        last_user_tokens = 0
-        if message_history[-1]["role"] == "user":
-            content = message_history[-1]["content"]
-            last_user_tokens = int(
-                self._estimate_tokens(str(content)) * buffer_factor
-            )
-
-        estimated_total = (
-            last_prompt_tokens
-            + last_completion_tokens
-            + last_user_tokens
-            + summary_tokens
-            + self.max_tokens
-            + 1000
-        )
-
-        if estimated_total >= self.max_context_length:
-            self.task_log.log_step(
-                "info",
-                "LLM | Context Limit Reached",
-                "Context limit reached, rolling back last assistant-user pair.",
-            )
-            if message_history[-1]["role"] == "user":
-                message_history.pop()
-            if message_history[-1]["role"] == "assistant":
-                message_history.pop()
-            self.task_log.log_step(
-                "info",
-                "LLM | Context Limit Reached",
-                f"Removed the last assistant-user pair, "
-                f"current message_history length: {len(message_history)}",
-            )
-            return False, message_history
-
+        """Stateful AgentHub manages context; skip local rollback/cropping."""
         self.task_log.log_step(
-            "info",
-            "LLM | Context Limit Not Reached",
-            f"{estimated_total}/{self.max_context_length}",
+            "debug",
+            "LLM | Context Check Skipped",
+            "AgentHub stateful mode enabled; skipping local context rollback.",
         )
         return True, message_history
+
+    def close(self):
+        """Clear all stateful AgentHub histories."""
+        for client in self._stateful_clients.values():
+            if hasattr(client, "clear_history"):
+                client.clear_history()
+        self._stateful_clients.clear()
 
     def format_token_usage_summary(self) -> Tuple[List[str], str]:
         """Format token usage statistics."""
