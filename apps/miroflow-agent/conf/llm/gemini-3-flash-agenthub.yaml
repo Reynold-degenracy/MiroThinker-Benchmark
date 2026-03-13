@@ -1,0 +1,11 @@
+# gemini-3-flash-agenthub.yaml - Gemini 3 Flash via AgentHub
+defaults:
+  - default
+  - _self_
+
+provider: "agenthub"
+model_name: "gemini-3-flash-preview"
+api_key: ${oc.env:GEMINI_API_KEY}
+base_url: ${oc.env:GEMINI_BASE_URL}
+max_context_length: 128000
+temperature: 1.0
