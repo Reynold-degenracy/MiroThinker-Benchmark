@@ -817,7 +817,7 @@ class Orchestrator:
             )
 
         self.task_log.sub_agent_message_history_sessions[
-            self.task_log.current_sub_agent_session_id
+            self.task_log.current_subagent_run_id
         ] = {"system_prompt": system_prompt, "message_history": message_history}
 
         self.task_log.save()

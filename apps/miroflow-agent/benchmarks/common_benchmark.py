@@ -299,8 +299,9 @@ class BenchmarkEvaluator(ABC):
                                 final_boxed_answer,
                                 log_file_path,
                             ) = await execute_task_pipeline(
+                                api_session_id=f"{task.task_id}_attempt-{attempt}",
                                 cfg=self.cfg,
-                                task_id=f"{task.task_id}_attempt-{attempt}_format-retry-{format_retry_count}",
+                                run_id=f"{task.task_id}_attempt-{attempt}_format-retry-{format_retry_count}",
                                 task_file_name=task_file_path,
                                 task_description=task_description,
                                 main_agent_tool_manager=self.main_agent_tool_manager,

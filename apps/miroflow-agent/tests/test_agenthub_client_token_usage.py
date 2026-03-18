@@ -11,7 +11,7 @@ class DummyTaskLog:
     def __init__(self, log_dir: str) -> None:
         self.entries = []
         self.log_dir = log_dir
-        self.current_sub_agent_session_id = None
+        self.current_subagent_run_id = None
 
     def log_step(self, info_level, step_name, message, metadata=None):
         self.entries.append(
@@ -66,7 +66,8 @@ def build_cfg():
 def client_and_log(tmp_path: Path):
     task_log = DummyTaskLog(log_dir=str(tmp_path / "logs"))
     client = AgentHubClientForTest(
-        task_id="task-1",
+        run_id="run-1",
+        api_session_id="session-1",
         cfg=build_cfg(),
         task_log=task_log,
     )
@@ -109,7 +110,7 @@ async def test_counts_usage_when_usage_metadata_is_on_delta_event(client_and_log
             "role": "user",
             "content_items": [{"type": "text", "text": "What is 2+2?"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -117,7 +118,7 @@ async def test_counts_usage_when_usage_metadata_is_on_delta_event(client_and_log
     assert client.token_usage["total_output_tokens"] == 7
     assert client.token_usage["total_cache_read_input_tokens"] == 3
     assert client.last_call_tokens == {"prompt_tokens": 11, "completion_tokens": 7}
-    assert stateful_client.calls[0]["config"]["trace_id"] == "task-1/main/turn_1_attempt_1"
+    assert stateful_client.calls[0]["config"]["trace_id"] == "run-1/main/turn_1_attempt_1"
 
 
 @pytest.mark.asyncio
@@ -150,7 +151,7 @@ async def test_counts_usage_when_usage_metadata_is_on_stop_event(client_and_log)
             "role": "user",
             "content_items": [{"type": "text", "text": "hello"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -186,7 +187,7 @@ async def test_logs_warning_when_usage_metadata_is_missing(client_and_log):
             "role": "user",
             "content_items": [{"type": "text", "text": "hello"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -205,7 +206,7 @@ async def test_logs_warning_when_usage_metadata_is_missing(client_and_log):
 @pytest.mark.asyncio
 async def test_create_message_uses_stateful_trace_id_and_latest_user_only(client_and_log):
     client, task_log = client_and_log
-    task_log.current_sub_agent_session_id = "agent-web-1"
+    task_log.current_subagent_run_id = "agent-web-1"
 
     captured = {"messages": [], "trace_ids": []}
 
@@ -267,8 +268,10 @@ async def test_create_message_uses_stateful_trace_id_and_latest_user_only(client
     assert (
         captured["messages"][0]["content_items"][0]["text"] == "latest user turn"
     )
-    assert captured["trace_ids"][0] == "task-1/agent-web/turn_2_attempt_1"
-    assert captured["trace_ids"][1] == "task-1/agent-web/turn_2_attempt_2"
+    assert captured["trace_ids"][0] == "run-1/agent-web/turn_2_attempt_1"
+    assert captured["trace_ids"][1] == "run-1/agent-web/turn_2_attempt_2"
+    assert client._conversation_key("agent-web") == "session-1/agent-web-1"
+    assert client._conversation_key("main") == "session-1/main"
 
 
 def test_trace_root_is_under_task_log_dir(client_and_log):
@@ -344,7 +347,8 @@ def test_sanitize_stateful_history_drops_assistant_replay_for_openrouter_gpt52(
     )
     task_log = DummyTaskLog(log_dir=str(tmp_path / "logs"))
     client = AgentHubClientForTest(
-        task_id="task-1",
+        run_id="run-1",
+        api_session_id="session-1",
         cfg=cfg,
         task_log=task_log,
     )

@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -359,14 +360,14 @@ def _create_session_with_wrapped_managers(cfg: DictConfig) -> Dict:
 
 
 async def _get_or_create_session(
-    session_id: str,
+    api_session_id: str,
     config_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict:
     """
     Get an existing session or create one atomically.
 
     Notes:
-    - A single session_id always maps to exactly one session/sandbox.
+    - A single api_session_id always maps to exactly one session/sandbox.
     - config_overrides only apply when creating a new session.
     """
     override_list = None
@@ -374,22 +375,22 @@ async def _get_or_create_session(
         override_list = [f"{key}={value}" for key, value in config_overrides.items()]
 
     async with _sessions_lock:
-        session = _sessions.get(session_id)
+        session = _sessions.get(api_session_id)
         if session is not None:
             if config_overrides:
                 logger.warning(
-                    f"Ignoring config_overrides for existing session {session_id} to keep a single sandbox per session."
+                    f"Ignoring config_overrides for existing session {api_session_id} to keep a single sandbox per session."
                 )
             return session
 
         cfg = initialize_config(overrides=override_list)
         session = _create_session_with_wrapped_managers(cfg)
-        _sessions[session_id] = session
+        _sessions[api_session_id] = session
 
     if override_list:
-        logger.info(f"Created session {session_id} with config overrides: {override_list}")
+        logger.info(f"Created session {api_session_id} with config overrides: {override_list}")
     else:
-        logger.info(f"Created session {session_id} with default config")
+        logger.info(f"Created session {api_session_id} with default config")
 
     return session
 
@@ -608,7 +609,7 @@ def _cleanup_temp_file(file_path: Optional[str]) -> None:
 
 async def stream_generator(
     messages: List[ExecuteMessage],
-    session_id: str,
+    api_session_id: str,
     config_overrides: Optional[Dict[str, str]] = None,
 ):
     """
@@ -630,19 +631,19 @@ async def stream_generator(
 
     # Get or create pipeline components for this session atomically.
     session = await _get_or_create_session(
-        session_id=session_id,
+        api_session_id=api_session_id,
         config_overrides=config_overrides,
     )
     cfg = session["cfg"]
     
     # Prepare task parameters
-    task_id = f"api_{session_id}"
+    run_id = f"api_run_{api_session_id}_{uuid.uuid4().hex}"
     task_description = query
     
     # Download file from sandbox /home/user/uploaded folder to local temp path
     task_file_name = await _download_sandbox_file_to_local(session)
     if task_file_name:
-        logger.info(f"Downloaded file from sandbox for session {session_id}: {task_file_name}")
+        logger.info(f"Downloaded file from sandbox for session {api_session_id}: {task_file_name}")
     
     async def consume_stream():
         """Consume stream events and transform them"""
@@ -833,7 +834,8 @@ async def stream_generator(
         try:
             await execute_task_pipeline(
                 cfg=cfg,
-                task_id=task_id,
+                api_session_id=api_session_id,
+                run_id=run_id,
                 task_file_name=task_file_name,
                 task_description=task_description,
                 main_agent_tool_manager=session["main_agent_tool_manager"],
@@ -907,12 +909,13 @@ async def execute(
     {"type": "end", "step": 1, "delta": ""}
     """
     try:
+        api_session_id = x_session_id
         _validate_json_content_type(content_type)
         _validate_bearer_auth(authorization)
         if not request.message:
             raise HTTPException(status_code=400, detail="message is required")
         primary_message = next((msg for msg in request.message if msg.type == "query"), request.message[0])
-        logger.info(f"Received execute request for session {x_session_id}: {primary_message.content}")
+        logger.info(f"Received execute request for session {api_session_id}: {primary_message.content}")
         
         if request.config_overrides:
             logger.info(f"Config overrides provided: {request.config_overrides}")
@@ -920,7 +923,7 @@ async def execute(
         return StreamingResponse(
             stream_generator(
                 messages=request.message,
-                session_id=x_session_id,
+                api_session_id=api_session_id,
                 config_overrides=request.config_overrides,
             ),
             media_type="application/x-ndjson",
@@ -964,6 +967,7 @@ async def upload(
         - Endpoint available at /v1/api/upload
     """
     try:
+        api_session_id = x_session_id
         _validate_bearer_auth(authorization)
         # Validate filename
         if not file.filename or file.filename.strip() == "":
@@ -979,10 +983,10 @@ async def upload(
                 detail="Invalid filename: path traversal characters not allowed"
             )
         
-        logger.info(f"Received file upload request for session {x_session_id}: {safe_filename}")
+        logger.info(f"Received file upload request for session {api_session_id}: {safe_filename}")
 
         # Get or create session atomically.
-        session = await _get_or_create_session(session_id=x_session_id)
+        session = await _get_or_create_session(api_session_id=api_session_id)
         tool_manager = session["main_agent_tool_manager"]
         
         # The SessionAwareSandboxManager will automatically create and inject sandbox_id

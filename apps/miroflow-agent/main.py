@@ -28,14 +28,16 @@ async def amain(cfg: DictConfig) -> None:
     )
 
     # Define task parameters
-    task_id = "task_example"
+    run_id = "task_example"
+    api_session_id = run_id
     task_description = "What is the title of today's arxiv paper in computer science?"
     task_file_name = ""
 
     # Execute task using the pipeline
     final_summary, final_boxed_answer, log_file_path = await execute_task_pipeline(
         cfg=cfg,
-        task_id=task_id,
+        api_session_id=api_session_id,
+        run_id=run_id,
         task_file_name=task_file_name,
         task_description=task_description,
         main_agent_tool_manager=main_agent_tool_manager,

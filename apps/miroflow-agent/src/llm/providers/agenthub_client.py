@@ -196,12 +196,13 @@ class AgentHubClient(BaseClient):
 
     def _conversation_key(self, agent_type: str) -> str:
         """Build an isolated stateful conversation key."""
+        root = self.api_session_id
         if agent_type == "main":
-            return f"{self.task_id}/main"
-        session_id = getattr(self.task_log, "current_sub_agent_session_id", None)
-        if session_id:
-            return f"{self.task_id}/{session_id}"
-        return f"{self.task_id}/{agent_type}"
+            return f"{root}/main"
+        subagent_run_id = getattr(self.task_log, "current_subagent_run_id", None)
+        if subagent_run_id:
+            return f"{root}/{subagent_run_id}"
+        return f"{root}/{agent_type}"
 
     def _get_stateful_client(self, agent_type: str) -> _AutoLLMClient:
         """Get or create a stateful AutoLLMClient for current conversation."""
@@ -290,7 +291,7 @@ class AgentHubClient(BaseClient):
         counter_key = (agent_type, turn)
         attempt = self._trace_attempt_counters.get(counter_key, 0) + 1
         self._trace_attempt_counters[counter_key] = attempt
-        return f"{self.task_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
+        return f"{self.run_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
 
     @staticmethod
     def _get_latest_user_message(

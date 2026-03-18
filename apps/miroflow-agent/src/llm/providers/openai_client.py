@@ -29,7 +29,7 @@ class OpenAIClient(BaseClient):
         else:
             logger.warning(f"LLM Client Init | Provider: {self.provider} | Model: {self.model_name} | Base URL: {self.base_url} | API Key: NOT SET")
 
-        http_client_args = {"headers": {"x-upstream-session-id": self.task_id}}
+        http_client_args = {"headers": {"x-upstream-session-id": self.api_session_id}}
 
         try:
             if self.async_client:
