@@ -893,7 +893,7 @@ async def execute(
     
     Expected headers:
     - Content-Type: application/json
-    - X-Session-Id: <session>
+    - X-Session-Id: <stable api session>
     - Authorization: Bearer <token>
     
     Body example:
@@ -907,6 +907,10 @@ async def execute(
     {"type": "start", "step": 1, "delta": ""}
     {"type": "answer", "step": 1, "delta": "..."}
     {"type": "end", "step": 1, "delta": ""}
+
+    Notes:
+    - `X-Session-Id` is the stable client-visible session identifier.
+    - Each execute request also gets an internal server-generated run_id used for logging and tracing.
     """
     try:
         api_session_id = x_session_id

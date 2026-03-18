@@ -139,12 +139,12 @@ async def test_execute_task_pipeline_separates_api_session_id_and_run_id(
             captured["orchestrator_kwargs"] = kwargs
 
         async def run_main_agent(
-            self, task_description, task_file_name, task_id, initial_message_history=None
+            self, task_description, task_file_name, run_id, initial_message_history=None
         ):
             captured["run_main_agent_kwargs"] = {
                 "task_description": task_description,
                 "task_file_name": task_file_name,
-                "task_id": task_id,
+                "run_id": run_id,
                 "initial_message_history": initial_message_history,
             }
             return "summary", "boxed"
@@ -199,9 +199,10 @@ async def test_execute_task_pipeline_separates_api_session_id_and_run_id(
 
     assert captured["client_factory"]["api_session_id"] == "session-xyz"
     assert captured["client_factory"]["run_id"] == "run-xyz"
-    assert captured["run_main_agent_kwargs"]["task_id"] == "run-xyz"
+    assert captured["run_main_agent_kwargs"]["run_id"] == "run-xyz"
 
     log_data = json.loads(Path(log_file_path).read_text(encoding="utf-8"))
+    assert log_data["run_id"] == "run-xyz"
     assert log_data["task_id"] == "run-xyz"
     assert log_data["input"]["api_session_id"] == "session-xyz"
     assert log_data["input"]["run_id"] == "run-xyz"

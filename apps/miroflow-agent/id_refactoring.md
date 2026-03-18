@@ -1,5 +1,24 @@
 # ID Refactoring Notes for `miroflow-agent`
 
+## 当前实现状态（2026-03）
+
+目前代码已经完成到以下状态：
+
+- `X-Session-Id` 在 API 层显式对应 `api_session_id`
+- 每次 `/v1/api/execute` 会生成内部 `run_id`
+- provider 上游 header 使用 `api_session_id`
+- AgentHub conversation key 使用 `api_session_id`
+- AgentHub trace id 使用 `run_id`
+- 运行态 `task_id` 已逐步收敛为 `run_id`
+
+为了兼容旧日志/旧调用方，当前仍保留少量兼容层：
+
+- `BaseClient.task_id -> run_id` 的别名
+- `TaskLog.task_id -> run_id` 的别名
+- `TaskLog` 导出的 JSON 同时包含 `run_id` 和 `task_id`
+
+这些兼容字段是有意保留的，不再代表新的主语义。
+
 ## 背景
 
 在排查“同一个会话的不同轮次实际落到不同沙箱”问题时，最初直觉是怀疑 `api_server.py` 里的 session/sandbox 绑定逻辑有问题，例如 `_sessions` 是否没有真正按 `X-Session-Id` 复用。

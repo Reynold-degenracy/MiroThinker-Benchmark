@@ -27,7 +27,7 @@ async def amain(cfg: DictConfig) -> None:
         create_pipeline_components(cfg)
     )
 
-    # Define task parameters
+    # Define identifiers and inputs for a single local run.
     run_id = "task_example"
     api_session_id = run_id
     task_description = "What is the title of today's arxiv paper in computer science?"

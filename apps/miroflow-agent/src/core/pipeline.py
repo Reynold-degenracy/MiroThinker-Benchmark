@@ -37,7 +37,7 @@ async def execute_task_pipeline(
     sub_agent_tool_definitions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ):
     """
-    Executes the full pipeline for a single task.
+    Executes the full pipeline for a single run.
 
     Args:
         cfg: The Hydra configuration object.
@@ -59,10 +59,10 @@ async def execute_task_pipeline(
         - The final boxed answer.
         - The path to the log file.
     """
-    # Create task log
+    # Create run log
     task_log = TaskLog(
         log_dir=log_dir,
-        task_id=run_id,
+        run_id=run_id,
         start_time=get_utc_plus_8_time(),
         input={
             "task_description": task_description,
@@ -74,7 +74,7 @@ async def execute_task_pipeline(
         ground_truth=ground_truth,
     )
 
-    # Log task start
+    # Log run start
     task_log.log_step(
         "info", "Main | Task Start", f"--- Starting Task Execution: {run_id} ---"
     )
@@ -110,7 +110,7 @@ async def execute_task_pipeline(
         final_summary, final_boxed_answer = await orchestrator.run_main_agent(
             task_description=task_description,
             task_file_name=task_file_name,
-            task_id=run_id,
+            run_id=run_id,
             initial_message_history=initial_message_history,
         )
 
@@ -127,12 +127,12 @@ async def execute_task_pipeline(
         task_log.log_step(
             "warning",
             "task_error_notification",
-            f"An error occurred during task {run_id}",
+            f"An error occurred during run {run_id}",
         )
         task_log.log_step("error", "task_error_details", error_details)
 
         error_message = (
-            f"Error executing task {run_id}:\n"
+            f"Error executing run {run_id}:\n"
             f"Description: {task_description}\n"
             f"File: {task_file_name}\n"
             f"Error Type: {type(e).__name__}\n"
@@ -149,11 +149,11 @@ async def execute_task_pipeline(
     finally:
         task_log.end_time = get_utc_plus_8_time()
 
-        # Record task summary to structured log
+        # Record run summary to structured log
         task_log.log_step(
             "info",
             "task_execution_finished",
-            f"Task {run_id} execution completed with status: {task_log.status}",
+            f"Run {run_id} execution completed with status: {task_log.status}",
         )
         task_log.save()
 

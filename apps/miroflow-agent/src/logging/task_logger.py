@@ -147,7 +147,7 @@ class TaskLog:
     start_time: str = ""
     end_time: str = ""
 
-    task_id: str = ""
+    run_id: str = ""
     input: Any = None
     ground_truth: str = ""
     final_boxed_answer: str = ""
@@ -210,6 +210,15 @@ class TaskLog:
     @current_sub_agent_session_id.setter
     def current_sub_agent_session_id(self, value: Optional[str]) -> None:
         self.current_subagent_run_id = value
+
+    @property
+    def task_id(self) -> str:
+        """Backward-compatible alias for logs/tools that still refer to task_id."""
+        return self.run_id
+
+    @task_id.setter
+    def task_id(self, value: str) -> None:
+        self.run_id = value
 
     def log_step(
         self,
@@ -290,6 +299,7 @@ class TaskLog:
     def to_json(self):
         # Convert to dict first
         data_dict = asdict(self)
+        data_dict["task_id"] = self.run_id
         # Serialize any non-JSON-serializable objects
         serialized_dict = self.serialize_for_json(data_dict)
         try:
@@ -306,7 +316,7 @@ class TaskLog:
             self.start_time.replace(":", "-").replace(".", "-").replace(" ", "-")
         )
 
-        filename = f"{self.log_dir}/task_{self.task_id}_{timestamp}.json"
+        filename = f"{self.log_dir}/task_{self.run_id}_{timestamp}.json"
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(self.to_json())
@@ -319,4 +329,7 @@ class TaskLog:
 
     @classmethod
     def from_dict(cls, d):
+        if "run_id" not in d and "task_id" in d:
+            d = dict(d)
+            d["run_id"] = d["task_id"]
         return cls(**d)
