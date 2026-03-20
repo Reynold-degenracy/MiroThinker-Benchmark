@@ -38,7 +38,8 @@ class TokenUsage(TypedDict, total=True):
 @dataclasses.dataclass
 class BaseClient(ABC):
     # Required arguments (no default value)
-    task_id: str
+    run_id: str
+    api_session_id: str
     cfg: DictConfig
 
     # Optional arguments (with default value)
@@ -73,6 +74,11 @@ class BaseClient(ABC):
             "LLM | Initialization",
             f"LLMClient {self.provider} {self.model_name} initialization completed.",
         )
+
+    @property
+    def task_id(self) -> str:
+        """Backward-compatible alias for legacy call sites that still expect task_id."""
+        return self.run_id
 
     def _reset_token_usage(self) -> TokenUsage:
         """Reset token usage counter - implemented by concrete classes"""

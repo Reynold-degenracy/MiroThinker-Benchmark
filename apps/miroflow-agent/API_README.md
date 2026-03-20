@@ -1,6 +1,18 @@
 # MiroFlow Agent API
 
-This API provides a streaming endpoint for the MiroFlow Agent to process queries and return responses in real-time.
+This API exposes:
+
+- a streaming execution endpoint
+- a session-scoped file upload endpoint
+- automatic sandbox management bound to `X-Session-Id`
+
+The server now uses a two-level identity model internally:
+
+- **API session ID**: the stable client-supplied `X-Session-Id`
+- **Run ID**: a server-generated unique identifier for each `/v1/api/execute` call
+
+`X-Session-Id` is used for session/sandbox continuity.  
+The internal run ID is used for logs and traces.
 
 ## Running the Server
 
@@ -33,11 +45,11 @@ python3 api_server.py llm=gpt-5 llm.api_key=your-openai-key
 
 These CLI overrides set the **default configuration** for the server. All API requests will use these settings unless overridden per-request using the `config_overrides` parameter (see [Configuration Overrides](#configuration-overrides) section).
 
-## API Endpoint
+## API Endpoints
 
-### POST /get_response
+### POST /v1/api/execute
 
-Submit a question and receive streaming responses.
+Submit one execution request and receive streamed NDJSON output.
 
 #### Headers
 
@@ -48,14 +60,11 @@ Submit a question and receive streaming responses.
 
 ```json
 {
-  "query": "user_files 文件夹里的文件主题是什么",
-  "history": [
-    {"role": "user", "content": "你好"},
-    {"role": "assistant", "content": "你好，有什么可以帮你？"}
+  "message": [
+    {"type": "query", "step": 1, "content": "user_files 文件夹里的文件主题是什么"}
   ],
-  "is_confirmed": false,
   "config_overrides": {
-    "llm.provider": "qwen",
+    "llm": "qwen-3",
     "llm.base_url": "http://localhost:8000/v1"
   }
 }
@@ -65,9 +74,7 @@ Submit a question and receive streaming responses.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| query | string | Yes | User's question |
-| history | array | No | Conversation history (elements contain role and content). **Note: Currently not supported - each request starts a new conversation** |
-| is_confirmed | bool | Yes | Whether the plan is confirmed. `false`: continue planner flow, `true`: execute actor flow |
+| message | array | Yes | Message list. At least one item is required; the primary query should use `{"type":"query","step":1,"content":"..."}` |
 | config_overrides | object | No | Hydra configuration overrides (e.g., LLM provider, model, base_url). See [Configuration Overrides](#configuration-overrides) section |
 
 #### Response Format
@@ -75,37 +82,36 @@ Submit a question and receive streaming responses.
 The response is streamed in NDJSON (Newline Delimited JSON) format:
 
 ```json
-{"status":"plan", "step": 1, "data":"Workflow started"}
-{"status":"plan", "step": 2, "data":"Using tool: search with input: {...}"}
-{"status":"answer", "data":"I am"}
-{"status":"answer", "data":" Manus"}
-{"status":"answer", "data":"\n"}
-{"status":"answer", "data":"The answer is..."}
+{"type":"start","step":1,"delta":""}
+{"type":"answer","step":1,"delta":"I am"}
+{"type":"answer","step":1,"delta":" Manus"}
+{"type":"answer","step":1,"delta":"\n"}
+{"type":"end","step":1,"delta":""}
 ```
 
 **Response Fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| status | "plan" or "answer" | Event type - "plan" for planning steps, "answer" for response text |
-| step | int (optional) | Current step number (only present when status="plan") |
-| data | string | Text fragment |
+| type | `"start"` / `"answer"` / `"end"` | Stream event type |
+| step | int | Step number. The current API keeps this at `1` |
+| delta | string | Incremental text payload |
 
 ## Example Usage
 
 ### Using curl
 
 ```bash
-curl http://localhost:8000/get_response \
+curl http://localhost:7210/v1/api/execute \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_001" \
   -d '{
-    "query": "user_files 文件夹里的文件主题是什么",
-    "history": [
-      {"role": "user", "content": "你好"},
-      {"role": "assistant", "content": "你好，有什么可以帮你？"}
+    "message": [
+      {"type": "query", "step": 1, "content": "user_files 文件夹里的文件主题是什么"}
     ],
-    "is_confirmed": false
+    "config_overrides": {
+      "llm": "qwen-3"
+    }
   }'
 ```
 
@@ -115,18 +121,15 @@ curl http://localhost:8000/get_response \
 import requests
 import json
 
-url = "http://localhost:8000/get_response"
+url = "http://localhost:7210/v1/api/execute"
 headers = {
     "Content-Type": "application/json",
     "X-Session-Id": "sess_001"
 }
 data = {
-    "query": "user_files 文件夹里的文件主题是什么",
-    "history": [
-        {"role": "user", "content": "你好"},
-        {"role": "assistant", "content": "你好，有什么可以帮你？"}
+    "message": [
+        {"type": "query", "step": 1, "content": "user_files 文件夹里的文件主题是什么"}
     ],
-    "is_confirmed": False
 }
 
 response = requests.post(url, headers=headers, json=data, stream=True)
@@ -134,12 +137,12 @@ response = requests.post(url, headers=headers, json=data, stream=True)
 for line in response.iter_lines():
     if line:
         event = json.loads(line)
-        print(f"[{event['status']}] {event.get('step', '')}: {event['data']}")
+        print(f"[{event['type']}] {event.get('step', '')}: {event['delta']}")
 ```
 
-## POST /upload_file
+### POST /v1/api/upload
 
-Upload a file to the `/home/user/user_files/` directory.
+Upload a file to the session sandbox under `/home/user/uploaded/`.
 
 ### Headers
 
@@ -155,11 +158,7 @@ Upload a file to the `/home/user/user_files/` directory.
 ### Response Format
 
 ```json
-{
-  "data": {
-    "path": "/home/user/user_files/example.txt"
-  }
-}
+{"data":{"path":"/home/user/uploaded/example.txt"}}
 ```
 
 **Response Fields:**
@@ -173,7 +172,7 @@ Upload a file to the `/home/user/user_files/` directory.
 #### Using curl
 
 ```bash
-curl http://localhost:8000/upload_file \
+curl http://localhost:7210/v1/api/upload \
   -H "X-Session-Id: sess_001" \
   -F "file=@/path/to/example.txt"
 ```
@@ -183,7 +182,7 @@ curl http://localhost:8000/upload_file \
 ```python
 import requests
 
-url = "http://localhost:8000/upload_file"
+url = "http://localhost:7210/v1/api/upload"
 headers = {
     "X-Session-Id": "sess_001"
 }
@@ -193,23 +192,33 @@ with open("/path/to/example.txt", "rb") as f:
     files = {"file": f}
     response = requests.post(url, headers=headers, files=files)
     print(response.json())
-    # Output: {"data": {"path": "/home/user/user_files/example.txt"}}
+    # Output: {"data": {"path": "/home/user/uploaded/example.txt"}}
 ```
 
-### Sandbox Notes
+## Identity Model
+
+- **`X-Session-Id` / API session ID**  
+  Stable across multiple requests from the same client conversation/thread.
+
+- **Sandbox ID**  
+  Internal execution environment identifier. Managed automatically and reused per API session when available.
+
+- **Run ID**  
+  Internal identifier generated for each `/v1/api/execute` request. Used for logs and traces only. Clients do not supply it.
+
+## Sandbox Notes
 
 - **Each `X-Session-Id` corresponds to a persistent sandbox**: Sandboxes are automatically created and reused across multiple requests with the same session ID
+- **Each `/v1/api/execute` call also gets its own internal run ID**: This is separate from `X-Session-Id` and is used for tracing/debugging
 - **Automatic sandbox management**: Python tools (like `run_command`, `run_python_code`) automatically use the session's sandbox without requiring explicit `sandbox_id` parameters
 - **Sandbox lifecycle**: 3600 seconds (1 hour) default TTL. If a sandbox expires or becomes unavailable, a new one is automatically created on the next Python tool call
 - **Session isolation**: Each session has its own sandbox, ensuring isolation between different users or conversation threads
 - **No manual management needed**: The `SessionAwareSandboxManager` handles all sandbox creation, reuse, and cleanup automatically
 
-For technical details about the sandbox-to-session mapping implementation, see [SANDBOX_SESSION_MAPPING.md](./SANDBOX_SESSION_MAPPING.md).
-
 ## Health Check
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:7210/health
 ```
 
 Returns: `{"status": "healthy"}`
@@ -223,8 +232,9 @@ You can override Hydra configuration settings on a per-request basis using the `
 **Use a different LLM provider:**
 ```json
 {
-  "query": "What is 2+2?",
-  "is_confirmed": false,
+  "message": [
+    {"type": "query", "step": 1, "content": "What is 2+2?"}
+  ],
   "config_overrides": {
     "llm": "qwen-3",
     "llm.base_url": "http://localhost:61002/v1"
@@ -235,8 +245,9 @@ You can override Hydra configuration settings on a per-request basis using the `
 **Override specific LLM parameters:**
 ```json
 {
-  "query": "What is 2+2?",
-  "is_confirmed": false,
+  "message": [
+    {"type": "query", "step": 1, "content": "What is 2+2?"}
+  ],
   "config_overrides": {
     "llm.temperature": "0.7",
     "llm.max_tokens": "8192",
@@ -248,8 +259,9 @@ You can override Hydra configuration settings on a per-request basis using the `
 **Use Claude with custom API key:**
 ```json
 {
-  "query": "What is 2+2?",
-  "is_confirmed": false,
+  "message": [
+    {"type": "query", "step": 1, "content": "What is 2+2?"}
+  ],
   "config_overrides": {
     "llm": "claude-3-7",
     "llm.api_key": "your-api-key-here"
@@ -259,12 +271,13 @@ You can override Hydra configuration settings on a per-request basis using the `
 
 **Complete example with curl:**
 ```bash
-curl http://localhost:8000/get_response \
+curl http://localhost:7210/v1/api/execute \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_custom_llm" \
   -d '{
-    "query": "What is the capital of France?",
-    "is_confirmed": false,
+    "message": [
+      {"type": "query", "step": 1, "content": "What is the capital of France?"}
+    ],
     "config_overrides": {
       "llm": "qwen-3",
       "llm.base_url": "http://localhost:61002/v1",
@@ -296,9 +309,9 @@ See the `conf/` directory for all available configuration options.
 
 ## Session Management
 
-Each session is identified by the `X-Session-Id` header. The server maintains separate pipeline components for each session, allowing multiple concurrent users.
+Each session is identified by the `X-Session-Id` header. The server maintains separate pipeline components and sandbox state for each session, allowing multiple concurrent users.
 
-**Note:** When using `config_overrides`, each unique combination of session ID and configuration creates a separate session instance. This ensures that different configurations don't interfere with each other.
+**Important:** `config_overrides` are only applied when a session is first created. If you reuse an existing `X-Session-Id`, later overrides for that same session are ignored so the session continues to use one stable sandbox/conversation context.
 
 ## Configuration
 
@@ -308,4 +321,5 @@ The server uses the default Hydra configuration from the `conf/` directory. You 
 
 - The server requires all dependencies from `pyproject.toml` to be installed
 - Environment variables should be configured in `.env` file
-- The `is_confirmed` flag controls whether the response is in planning mode or execution mode
+- `X-Session-Id` is the stable client-visible session key
+- Each `/v1/api/execute` request also creates an internal run ID for logging/tracing

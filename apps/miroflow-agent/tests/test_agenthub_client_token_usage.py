@@ -11,7 +11,7 @@ class DummyTaskLog:
     def __init__(self, log_dir: str) -> None:
         self.entries = []
         self.log_dir = log_dir
-        self.current_sub_agent_session_id = None
+        self.current_subagent_run_id = None
 
     def log_step(self, info_level, step_name, message, metadata=None):
         self.entries.append(
@@ -66,7 +66,8 @@ def build_cfg():
 def client_and_log(tmp_path: Path):
     task_log = DummyTaskLog(log_dir=str(tmp_path / "logs"))
     client = AgentHubClientForTest(
-        task_id="task-1",
+        run_id="run-1",
+        api_session_id="session-1",
         cfg=build_cfg(),
         task_log=task_log,
     )
@@ -109,7 +110,7 @@ async def test_counts_usage_when_usage_metadata_is_on_delta_event(client_and_log
             "role": "user",
             "content_items": [{"type": "text", "text": "What is 2+2?"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -117,7 +118,7 @@ async def test_counts_usage_when_usage_metadata_is_on_delta_event(client_and_log
     assert client.token_usage["total_output_tokens"] == 7
     assert client.token_usage["total_cache_read_input_tokens"] == 3
     assert client.last_call_tokens == {"prompt_tokens": 11, "completion_tokens": 7}
-    assert stateful_client.calls[0]["config"]["trace_id"] == "task-1/main/turn_1_attempt_1"
+    assert stateful_client.calls[0]["config"]["trace_id"] == "run-1/main/turn_1_attempt_1"
 
 
 @pytest.mark.asyncio
@@ -150,7 +151,7 @@ async def test_counts_usage_when_usage_metadata_is_on_stop_event(client_and_log)
             "role": "user",
             "content_items": [{"type": "text", "text": "hello"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -186,7 +187,7 @@ async def test_logs_warning_when_usage_metadata_is_missing(client_and_log):
             "role": "user",
             "content_items": [{"type": "text", "text": "hello"}],
         },
-        config={"trace_id": "task-1/main/turn_1_attempt_1"},
+        config={"trace_id": "run-1/main/turn_1_attempt_1"},
     )
     client._update_token_usage(response.usage)
 
@@ -205,7 +206,7 @@ async def test_logs_warning_when_usage_metadata_is_missing(client_and_log):
 @pytest.mark.asyncio
 async def test_create_message_uses_stateful_trace_id_and_latest_user_only(client_and_log):
     client, task_log = client_and_log
-    task_log.current_sub_agent_session_id = "agent-web-1"
+    task_log.current_subagent_run_id = "agent-web-1"
 
     captured = {"messages": [], "trace_ids": []}
 
@@ -267,8 +268,10 @@ async def test_create_message_uses_stateful_trace_id_and_latest_user_only(client
     assert (
         captured["messages"][0]["content_items"][0]["text"] == "latest user turn"
     )
-    assert captured["trace_ids"][0] == "task-1/agent-web/turn_2_attempt_1"
-    assert captured["trace_ids"][1] == "task-1/agent-web/turn_2_attempt_2"
+    assert captured["trace_ids"][0] == "run-1/agent-web/turn_2_attempt_1"
+    assert captured["trace_ids"][1] == "run-1/agent-web/turn_2_attempt_2"
+    assert client._conversation_key("agent-web") == "session-1/agent-web-1"
+    assert client._conversation_key("main") == "session-1/main"
 
 
 def test_trace_root_is_under_task_log_dir(client_and_log):
@@ -276,112 +279,3 @@ def test_trace_root_is_under_task_log_dir(client_and_log):
     expected = (Path(task_log.log_dir) / "agenthub_traces").resolve()
     assert client._trace_root == expected
 
-
-def test_sanitize_stateful_history_removes_unsigned_thinking_items(client_and_log):
-    client, task_log = client_and_log
-
-    history = [
-        {
-            "role": "user",
-            "content_items": [{"type": "text", "text": "hello"}],
-        },
-        {
-            "role": "assistant",
-            "content_items": [
-                {"type": "thinking", "thinking": "kept", "signature": '{"id":"x"}'},
-                {"type": "thinking", "thinking": "drop me"},
-                {"type": "text", "text": "answer"},
-            ],
-        },
-    ]
-
-    class FakeInnerClient:
-        def __init__(self, history_ref):
-            self._history = history_ref
-
-    class FakeAutoClient:
-        def __init__(self, history_ref):
-            self._client = FakeInnerClient(history_ref)
-
-    stateful_client = FakeAutoClient(history)
-    client._sanitize_stateful_history(stateful_client)
-
-    content_items = history[1]["content_items"]
-    assert len(content_items) == 2
-    assert content_items[0]["type"] == "thinking"
-    assert "signature" in content_items[0]
-    assert content_items[1]["type"] == "text"
-
-    warnings = [
-        entry
-        for entry in task_log.entries
-        if entry["info_level"] == "warning"
-        and entry["step_name"] == "LLM | AgentHub History Sanitized"
-    ]
-    assert warnings
-
-
-def test_sanitize_stateful_history_drops_assistant_replay_for_openrouter_gpt52(
-    tmp_path: Path,
-):
-    cfg = OmegaConf.create(
-        {
-            "llm": {
-                "provider": "agenthub",
-                "model_name": "openai/gpt-5.2",
-                "temperature": 1.0,
-                "top_p": 1.0,
-                "min_p": 0.0,
-                "top_k": 0,
-                "max_context_length": 32768,
-                "max_tokens": 1024,
-                "async_client": True,
-                "keep_tool_result": -1,
-                "api_key": "test-key",
-                "base_url": "https://openrouter.ai/api/v1",
-            }
-        }
-    )
-    task_log = DummyTaskLog(log_dir=str(tmp_path / "logs"))
-    client = AgentHubClientForTest(
-        task_id="task-1",
-        cfg=cfg,
-        task_log=task_log,
-    )
-
-    history = [
-        {
-            "role": "user",
-            "content_items": [{"type": "text", "text": "question"}],
-        },
-        {
-            "role": "assistant",
-            "content_items": [{"type": "text", "text": "answer"}],
-        },
-        {
-            "role": "user",
-            "content_items": [{"type": "text", "text": "tool result"}],
-        },
-    ]
-
-    class FakeInnerClient:
-        def __init__(self, history_ref):
-            self._history = history_ref
-
-    class FakeAutoClient:
-        def __init__(self, history_ref):
-            self._client = FakeInnerClient(history_ref)
-
-    stateful_client = FakeAutoClient(history)
-    client._sanitize_stateful_history(stateful_client)
-
-    roles = [m["role"] for m in history]
-    assert roles == ["user", "user"]
-
-    warnings = [
-        entry
-        for entry in task_log.entries
-        if entry["info_level"] == "warning"
-        and entry["step_name"] == "LLM | AgentHub History Sanitized"
-    ]
-    assert warnings

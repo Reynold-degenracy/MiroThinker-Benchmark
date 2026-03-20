@@ -12,7 +12,11 @@ from .providers.openai_client import OpenAIClient
 
 
 def ClientFactory(
-    task_id: str, cfg: DictConfig, task_log: Optional[TaskLog] = None, **kwargs
+    run_id: str,
+    api_session_id: str,
+    cfg: DictConfig,
+    task_log: Optional[TaskLog] = None,
+    **kwargs,
 ):
     """
     Automatically select provider and create LLM client based on configuration
@@ -22,19 +26,35 @@ def ClientFactory(
 
     client_creators = {
         "anthropic": lambda: AnthropicClient(
-            task_id=task_id, task_log=task_log, cfg=config
+            run_id=run_id,
+            api_session_id=api_session_id,
+            task_log=task_log,
+            cfg=config,
         ),
-        "qwen": lambda: OpenAIClient(task_id=task_id, task_log=task_log, cfg=config),
-        "openai": lambda: OpenAIClient(task_id=task_id, task_log=task_log, cfg=config),
+        "qwen": lambda: OpenAIClient(
+            run_id=run_id,
+            api_session_id=api_session_id,
+            task_log=task_log,
+            cfg=config,
+        ),
+        "openai": lambda: OpenAIClient(
+            run_id=run_id,
+            api_session_id=api_session_id,
+            task_log=task_log,
+            cfg=config,
+        ),
         # AgentHub-routed providers (use agenthub AutoLLMClient)
         "agenthub": lambda: AgentHubClient(
-            task_id=task_id, task_log=task_log, cfg=config
+            run_id=run_id,
+            api_session_id=api_session_id,
+            task_log=task_log,
+            cfg=config,
         ),
         # "gemini": lambda: AgentHubClient(
-        #     task_id=task_id, task_log=task_log, cfg=config
+        #     run_id=run_id, api_session_id=api_session_id, task_log=task_log, cfg=config
         # ),
         # "glm": lambda: AgentHubClient(
-        #     task_id=task_id, task_log=task_log, cfg=config
+        #     run_id=run_id, api_session_id=api_session_id, task_log=task_log, cfg=config
         # ),
     }
 

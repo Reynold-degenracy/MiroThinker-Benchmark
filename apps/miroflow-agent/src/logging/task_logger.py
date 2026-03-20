@@ -147,7 +147,7 @@ class TaskLog:
     start_time: str = ""
     end_time: str = ""
 
-    task_id: str = ""
+    run_id: str = ""
     input: Any = None
     ground_truth: str = ""
     final_boxed_answer: str = ""
@@ -160,7 +160,7 @@ class TaskLog:
     current_main_turn_id: int = 0
     current_sub_agent_turn_id: int = 0
     sub_agent_counter: int = 0
-    current_sub_agent_session_id: Optional[str] = None
+    current_subagent_run_id: Optional[str] = None
 
     env_info: Optional[dict] = field(default_factory=dict)
     log_dir: str = "logs"
@@ -178,29 +178,47 @@ class TaskLog:
     ) -> str:
         """Start a new sub-agent session"""
         self.sub_agent_counter += 1
-        session_id = f"{sub_agent_name}_{self.sub_agent_counter}"
-        self.current_sub_agent_session_id = session_id
+        subagent_run_id = f"{sub_agent_name}_{self.sub_agent_counter}"
+        self.current_subagent_run_id = subagent_run_id
 
         # Record sub-agent session start
         self.log_step(
             "info",
             f"{sub_agent_name} | Session Start",
-            f"Starting {session_id} for subtask: {subtask_description[:100]}{'...' if len(subtask_description) > 100 else ''}",
-            metadata={"session_id": session_id, "subtask": subtask_description},
+            f"Starting {subagent_run_id} for subtask: {subtask_description[:100]}{'...' if len(subtask_description) > 100 else ''}",
+            metadata={"subagent_run_id": subagent_run_id, "subtask": subtask_description},
         )
 
-        return session_id
+        return subagent_run_id
 
     def end_sub_agent_session(self, sub_agent_name: str) -> Optional[str]:
         """End the current sub-agent session"""
         self.log_step(
             "info",
             f"{sub_agent_name} | Session End",
-            f"Ending {self.current_sub_agent_session_id}",
-            metadata={"session_id": self.current_sub_agent_session_id},
+            f"Ending {self.current_subagent_run_id}",
+            metadata={"subagent_run_id": self.current_subagent_run_id},
         )
-        self.current_sub_agent_session_id = None
+        self.current_subagent_run_id = None
         return None
+
+    @property
+    def current_sub_agent_session_id(self) -> Optional[str]:
+        """Backward-compatible alias for older code/tests."""
+        return self.current_subagent_run_id
+
+    @current_sub_agent_session_id.setter
+    def current_sub_agent_session_id(self, value: Optional[str]) -> None:
+        self.current_subagent_run_id = value
+
+    @property
+    def task_id(self) -> str:
+        """Backward-compatible alias for logs/tools that still refer to task_id."""
+        return self.run_id
+
+    @task_id.setter
+    def task_id(self, value: str) -> None:
+        self.run_id = value
 
     def log_step(
         self,
@@ -281,6 +299,7 @@ class TaskLog:
     def to_json(self):
         # Convert to dict first
         data_dict = asdict(self)
+        data_dict["task_id"] = self.run_id
         # Serialize any non-JSON-serializable objects
         serialized_dict = self.serialize_for_json(data_dict)
         try:
@@ -297,7 +316,7 @@ class TaskLog:
             self.start_time.replace(":", "-").replace(".", "-").replace(" ", "-")
         )
 
-        filename = f"{self.log_dir}/task_{self.task_id}_{timestamp}.json"
+        filename = f"{self.log_dir}/task_{self.run_id}_{timestamp}.json"
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(self.to_json())
@@ -310,4 +329,7 @@ class TaskLog:
 
     @classmethod
     def from_dict(cls, d):
+        if "run_id" not in d and "task_id" in d:
+            d = dict(d)
+            d["run_id"] = d["task_id"]
         return cls(**d)

@@ -1,9 +1,7 @@
 # Copyright (c) 2025 MiroMind
 # This source code is licensed under the MIT License.
 
-
 import traceback
-import uuid
 from typing import Any, Dict, List, Optional
 
 from miroflow_tools.manager import ToolManager
@@ -24,7 +22,8 @@ from .orchestrator import Orchestrator
 
 async def execute_task_pipeline(
     cfg: DictConfig,
-    task_id: str,
+    api_session_id: str,
+    run_id: str,
     task_description: str,
     task_file_name: str,
     main_agent_tool_manager: ToolManager,
@@ -38,13 +37,14 @@ async def execute_task_pipeline(
     sub_agent_tool_definitions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ):
     """
-    Executes the full pipeline for a single task.
+    Executes the full pipeline for a single run.
 
     Args:
         cfg: The Hydra configuration object.
         task_description: The description of the task for the LLM.
         task_file_name: The path to an associated file (optional).
-        task_id: A unique identifier for this task run (used for logging).
+        api_session_id: Stable session identifier for upstream conversation/sandbox reuse.
+        run_id: Unique identifier for this execution run (used for logging/tracing).
         main_agent_tool_manager: An initialized main agent ToolManager instance.
         sub_agent_tool_managers: A dictionary of initialized sub-agent ToolManager instances.
         output_formatter: An initialized OutputFormatter instance.
@@ -59,19 +59,24 @@ async def execute_task_pipeline(
         - The final boxed answer.
         - The path to the log file.
     """
-    # Create task log
+    # Create run log
     task_log = TaskLog(
         log_dir=log_dir,
-        task_id=task_id,
+        run_id=run_id,
         start_time=get_utc_plus_8_time(),
-        input={"task_description": task_description, "task_file_name": task_file_name},
+        input={
+            "task_description": task_description,
+            "task_file_name": task_file_name,
+            "api_session_id": api_session_id,
+            "run_id": run_id,
+        },
         env_info=get_env_info(cfg),
         ground_truth=ground_truth,
     )
 
-    # Log task start
+    # Log run start
     task_log.log_step(
-        "info", "Main | Task Start", f"--- Starting Task Execution: {task_id} ---"
+        "info", "Main | Task Start", f"--- Starting Task Execution: {run_id} ---"
     )
 
     # Set task_log for all ToolManager instances
@@ -82,9 +87,12 @@ async def execute_task_pipeline(
 
     try:
         # Initialize LLM client
-        random_uuid = str(uuid.uuid4())
-        unique_id = f"{task_id}-{random_uuid}"
-        llm_client = ClientFactory(task_id=unique_id, cfg=cfg, task_log=task_log)
+        llm_client = ClientFactory(
+            run_id=run_id,
+            api_session_id=api_session_id,
+            cfg=cfg,
+            task_log=task_log,
+        )
 
         # Initialize orchestrator
         orchestrator = Orchestrator(
@@ -102,7 +110,7 @@ async def execute_task_pipeline(
         final_summary, final_boxed_answer = await orchestrator.run_main_agent(
             task_description=task_description,
             task_file_name=task_file_name,
-            task_id=task_id,
+            run_id=run_id,
             initial_message_history=initial_message_history,
         )
 
@@ -119,12 +127,12 @@ async def execute_task_pipeline(
         task_log.log_step(
             "warning",
             "task_error_notification",
-            f"An error occurred during task {task_id}",
+            f"An error occurred during run {run_id}",
         )
         task_log.log_step("error", "task_error_details", error_details)
 
         error_message = (
-            f"Error executing task {task_id}:\n"
+            f"Error executing run {run_id}:\n"
             f"Description: {task_description}\n"
             f"File: {task_file_name}\n"
             f"Error Type: {type(e).__name__}\n"
@@ -141,11 +149,11 @@ async def execute_task_pipeline(
     finally:
         task_log.end_time = get_utc_plus_8_time()
 
-        # Record task summary to structured log
+        # Record run summary to structured log
         task_log.log_step(
             "info",
             "task_execution_finished",
-            f"Task {task_id} execution completed with status: {task_log.status}",
+            f"Run {run_id} execution completed with status: {task_log.status}",
         )
         task_log.save()
 

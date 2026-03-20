@@ -817,7 +817,7 @@ class Orchestrator:
             )
 
         self.task_log.sub_agent_message_history_sessions[
-            self.task_log.current_sub_agent_session_id
+            self.task_log.current_subagent_run_id
         ] = {"system_prompt": system_prompt, "message_history": message_history}
 
         self.task_log.save()
@@ -839,13 +839,13 @@ class Orchestrator:
         self,
         task_description,
         task_file_name=None,
-        task_id="default_task",
+        run_id="default_run",
         initial_message_history: Optional[List[Dict[str, str]]] = None,
     ):
         """Execute the main end-to-end task"""
         workflow_id = await self._stream_start_workflow(task_description)
 
-        self.task_log.log_step("info", "Main Agent", f"Start task with id: {task_id}")
+        self.task_log.log_step("info", "Main Agent", f"Start task with run id: {run_id}")
         self.task_log.log_step(
             "info", "Main Agent", f"Task description: {task_description}"
         )
@@ -1441,7 +1441,7 @@ class Orchestrator:
         self.task_log.log_step(
             "info",
             "Main Agent | Task Completed",
-            f"Main agent task {task_id} completed successfully",
+            f"Main agent run {run_id} completed successfully",
         )
         gc.collect()
         return final_summary, final_boxed_answer

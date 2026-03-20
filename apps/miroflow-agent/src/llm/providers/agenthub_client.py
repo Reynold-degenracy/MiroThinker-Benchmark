@@ -196,12 +196,13 @@ class AgentHubClient(BaseClient):
 
     def _conversation_key(self, agent_type: str) -> str:
         """Build an isolated stateful conversation key."""
+        root = self.api_session_id
         if agent_type == "main":
-            return f"{self.task_id}/main"
-        session_id = getattr(self.task_log, "current_sub_agent_session_id", None)
-        if session_id:
-            return f"{self.task_id}/{session_id}"
-        return f"{self.task_id}/{agent_type}"
+            return f"{root}/main"
+        subagent_run_id = getattr(self.task_log, "current_subagent_run_id", None)
+        if subagent_run_id:
+            return f"{root}/{subagent_run_id}"
+        return f"{root}/{agent_type}"
 
     def _get_stateful_client(self, agent_type: str) -> _AutoLLMClient:
         """Get or create a stateful AutoLLMClient for current conversation."""
@@ -216,81 +217,81 @@ class AgentHubClient(BaseClient):
             self._stateful_clients[key] = client
         return client
 
-    def _sanitize_stateful_history(self, stateful_client: Any) -> None:
-        """Remove malformed reasoning items that break AgentHub GPT-5.2 replay.
+    # def _sanitize_stateful_history(self, stateful_client: Any) -> None:
+    #     """Remove malformed reasoning items that break AgentHub GPT-5.2 replay.
 
-        OpenRouter may emit reasoning summary deltas without a signature field.
-        AgentHub GPT-5.2 expects every `thinking` item in history to include
-        `signature`, otherwise replay on the next turn raises KeyError('signature').
-        """
-        is_openrouter_gpt52 = (
-            "openrouter.ai" in (self.base_url or "").lower()
-            and "gpt-5.2" in (self.model_name or "").lower()
-        )
-        inner_client = getattr(stateful_client, "_client", None)
-        history = getattr(inner_client, "_history", None)
-        if not isinstance(history, list):
-            return
+    #     OpenRouter may emit reasoning summary deltas without a signature field.
+    #     AgentHub GPT-5.2 expects every `thinking` item in history to include
+    #     `signature`, otherwise replay on the next turn raises KeyError('signature').
+    #     """
+    #     is_openrouter_gpt52 = (
+    #         "openrouter.ai" in (self.base_url or "").lower()
+    #         and "gpt-5.2" in (self.model_name or "").lower()
+    #     )
+    #     inner_client = getattr(stateful_client, "_client", None)
+    #     history = getattr(inner_client, "_history", None)
+    #     if not isinstance(history, list):
+    #         return
 
-        removed_items = 0
-        removed_messages = 0
-        new_history: List[Dict[str, Any]] = []
+    #     removed_items = 0
+    #     removed_messages = 0
+    #     new_history: List[Dict[str, Any]] = []
 
-        for message in history:
-            if not isinstance(message, dict):
-                continue
-            role = message.get("role")
-            # OpenRouter Responses API rejects assistant-role replay items in input.
-            if is_openrouter_gpt52 and role == "assistant":
-                removed_messages += 1
-                continue
+    #     for message in history:
+    #         if not isinstance(message, dict):
+    #             continue
+    #         role = message.get("role")
+    #         # OpenRouter Responses API rejects assistant-role replay items in input.
+    #         if is_openrouter_gpt52 and role == "assistant":
+    #             removed_messages += 1
+    #             continue
 
-            content_items = message.get("content_items")
-            if not isinstance(content_items, list):
-                new_history.append(message)
-                continue
+    #         content_items = message.get("content_items")
+    #         if not isinstance(content_items, list):
+    #             new_history.append(message)
+    #             continue
 
-            filtered_items: List[Dict[str, Any]] = []
-            for item in content_items:
-                if (
-                    isinstance(item, dict)
-                    and item.get("type") == "thinking"
-                    and not item.get("signature")
-                ):
-                    removed_items += 1
-                    continue
-                filtered_items.append(item)
+    #         filtered_items: List[Dict[str, Any]] = []
+    #         for item in content_items:
+    #             if (
+    #                 isinstance(item, dict)
+    #                 and item.get("type") == "thinking"
+    #                 and not item.get("signature")
+    #             ):
+    #                 removed_items += 1
+    #                 continue
+    #             filtered_items.append(item)
 
-            if len(filtered_items) != len(content_items):
-                new_message = message.copy()
-                new_message["content_items"] = filtered_items
-                message = new_message
+    #         if len(filtered_items) != len(content_items):
+    #             new_message = message.copy()
+    #             new_message["content_items"] = filtered_items
+    #             message = new_message
 
-            # If everything got filtered out, skip this message.
-            if not filtered_items:
-                removed_messages += 1
-                continue
-            new_history.append(message)
+    #         # If everything got filtered out, skip this message.
+    #         if not filtered_items:
+    #             removed_messages += 1
+    #             continue
+    #         new_history.append(message)
 
-        history[:] = new_history
+    #     history[:] = new_history
 
-        if removed_items > 0 or removed_messages > 0:
-            self.task_log.log_step(
-                "warning",
-                "LLM | AgentHub History Sanitized",
-                (
-                    "Removed "
-                    f"{removed_items} malformed thinking item(s) and "
-                    f"{removed_messages} message(s) from stateful history."
-                ),
-            )
+    #     if removed_items > 0 or removed_messages > 0:
+    #         self.task_log.log_step(
+    #             "warning",
+    #             "LLM | AgentHub History Sanitized",
+    #             (
+    #                 "Removed "
+    #                 f"{removed_items} malformed thinking item(s) and "
+    #                 f"{removed_messages} message(s) from stateful history."
+    #             ),
+    #         )
 
     def _build_trace_id(self, agent_type: str, turn: int) -> str:
         """Build per-call trace id in required format."""
         counter_key = (agent_type, turn)
         attempt = self._trace_attempt_counters.get(counter_key, 0) + 1
         self._trace_attempt_counters[counter_key] = attempt
-        return f"{self.task_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
+        return f"{self.run_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
 
     @staticmethod
     def _get_latest_user_message(
@@ -374,14 +375,14 @@ class AgentHubClient(BaseClient):
         config["trace_id"] = self._build_trace_id(agent_type=agent_type, turn=turn)
         stateful_client = self._get_stateful_client(agent_type)
         # Ensure prior turns won't crash on GPT-5.2 replay due to malformed reasoning items.
-        self._sanitize_stateful_history(stateful_client)
+        # self._sanitize_stateful_history(stateful_client)
 
         try:
             response = await self._consume_uni_stream(
                 stateful_client, uni_messages[0], config, stream_queue
             )
             # AgentHub appends assistant message into stateful history after streaming.
-            self._sanitize_stateful_history(stateful_client)
+            # self._sanitize_stateful_history(stateful_client)
             self._update_token_usage(response.usage)
             self.task_log.log_step(
                 "info",
