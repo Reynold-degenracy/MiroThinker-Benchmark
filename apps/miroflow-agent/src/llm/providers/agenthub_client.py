@@ -2,6 +2,7 @@
 # This source code is licensed under the MIT License.
 
 import asyncio
+import copy
 import dataclasses
 import json
 import logging
@@ -176,6 +177,8 @@ class AgentHubClient(BaseClient):
         self._stateful_clients: Dict[str, _AutoLLMClient] = {}
         # Track attempts per (agent_type, turn) for trace_id generation.
         self._trace_attempt_counters: Dict[Tuple[str, int], int] = {}
+        # Keep only the final successful trace payload and flush it on close().
+        self._pending_trace: Optional[Dict[str, Any]] = None
         # Persist all AgentHub traces under task log directory.
         base_log_dir = Path(getattr(self.task_log, "log_dir", "logs")).expanduser()
         self._trace_root = (base_log_dir / "agenthub_traces").resolve()
@@ -293,6 +296,45 @@ class AgentHubClient(BaseClient):
         self._trace_attempt_counters[counter_key] = attempt
         return f"{self.run_id}/{agent_type}/turn_{turn}_attempt_{attempt}"
 
+    def _remember_pending_trace(
+        self,
+        stateful_client: _AutoLLMClient,
+        trace_id: str,
+        config: Dict[str, Any],
+    ) -> None:
+        """Snapshot the latest successful stateful history for flush-on-close."""
+        history_getter = getattr(stateful_client, "get_history", None)
+        if history_getter is None:
+            return
+
+        history = history_getter()
+        if not history:
+            return
+
+        self._pending_trace = {
+            "model": self.model_name,
+            "trace_id": trace_id,
+            "config": copy.deepcopy(config),
+            "history": copy.deepcopy(history),
+        }
+
+    def _flush_pending_trace(self) -> None:
+        """Persist only the last successful AgentHub trace."""
+        if not self._pending_trace:
+            return
+
+        from agenthub.integration.tracer import Tracer
+
+        pending_trace = self._pending_trace
+        tracer = Tracer(cache_dir=self._trace_root)
+        tracer.save_history(
+            pending_trace["model"],
+            pending_trace["history"],
+            pending_trace["trace_id"],
+            pending_trace["config"],
+        )
+        self._pending_trace = None
+
     @staticmethod
     def _get_latest_user_message(
         messages_history: List[Dict[str, Any]],
@@ -372,7 +414,9 @@ class AgentHubClient(BaseClient):
             max_tokens=self.max_tokens,
             system_prompt=system_prompt,
         )
-        config["trace_id"] = self._build_trace_id(agent_type=agent_type, turn=turn)
+        trace_id = self._build_trace_id(agent_type=agent_type, turn=turn)
+        trace_config = dict(config)
+        trace_config["trace_id"] = trace_id
         stateful_client = self._get_stateful_client(agent_type)
         # Ensure prior turns won't crash on GPT-5.2 replay due to malformed reasoning items.
         # self._sanitize_stateful_history(stateful_client)
@@ -388,6 +432,11 @@ class AgentHubClient(BaseClient):
                 "info",
                 "LLM | Call Status",
                 f"finish_reason: {response.choices[0].finish_reason}",
+            )
+            self._remember_pending_trace(
+                stateful_client=stateful_client,
+                trace_id=trace_id,
+                config=trace_config,
             )
             # Return the original messages_history (not the filtered copy) so the
             # complete conversation history is preserved in logs.
@@ -711,6 +760,7 @@ class AgentHubClient(BaseClient):
 
     def close(self):
         """Clear all stateful AgentHub histories."""
+        self._flush_pending_trace()
         for client in self._stateful_clients.values():
             if hasattr(client, "clear_history"):
                 client.clear_history()

@@ -59,6 +59,8 @@ async def execute_task_pipeline(
         - The final boxed answer.
         - The path to the log file.
     """
+    llm_client = None
+
     # Create run log
     task_log = TaskLog(
         log_dir=log_dir,
@@ -115,6 +117,7 @@ async def execute_task_pipeline(
         )
 
         llm_client.close()
+        llm_client = None
 
         task_log.final_boxed_answer = final_boxed_answer
         task_log.status = "success"
@@ -141,6 +144,10 @@ async def execute_task_pipeline(
 
         task_log.status = "failed"
         task_log.error = error_details
+
+        if llm_client is not None:
+            llm_client.close()
+            llm_client = None
 
         log_file_path = task_log.save()
 
